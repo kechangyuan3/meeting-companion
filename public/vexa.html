@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Vexa · 线上会议</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/vexa.css"></head>
+<body>
+  <header><div class="brand"><span class="brand-mark">m</span><span>会议搭子<span class="brand-sub">多服务工作台</span></span></div><div class="header-right"><span class="local-tag">本机运行 · Windows</span><span class="cloud-label">Vexa Cloud</span></div></header>
+  <main>
+    <nav class="service-nav" aria-label="会议方式"><a href="/" target="_blank" rel="noopener">现场语音 · MOSS ↗</a><a href="/vexa" aria-current="page">线上会议 · Vexa</a><span>MOSS 交流 · Vexa 转写 · Codex 整理</span></nav>
+    <section class="intro"><div class="eyebrow">ONLINE MEETING / VEXA + CODEX</div><h1>会议在别处，内容在这里。</h1><p>让 Vexa 加入你的线上会议，实时记录发言，再交给 Codex 整理结论。</p></section>
+    <div class="layout vexa-layout">
+      <aside>
+        <section class="card setup"><div class="section-title"><span class="step">01</span><h2>连接 Vexa</h2><span class="badge" id="vexa-key-badge">待填写</span></div><p class="muted small">使用 Vexa 自己的 Key，与 MOSS Key 分开。</p><label for="vexa-key">Vexa API Key</label><div class="key-line"><input id="vexa-key" type="password" autocomplete="off" placeholder="粘贴 Vexa Key" spellcheck="false"><button id="vexa-save" class="secondary">验证</button></div><p class="feedback" id="vexa-key-message" role="status">密钥仅保存在本机服务内存中。</p><div class="account-links"><a href="https://vexa.ai/account" target="_blank" rel="noopener noreferrer">登录 Vexa，获取 Key ↗</a><button id="vexa-forget" class="text-button" disabled>清除 Key</button></div></section>
+        <section class="card"><div class="section-title"><span class="step">02</span><h2>选择线上会议</h2></div><label for="meeting-url">会议邀请链接</label><input id="meeting-url" type="url" autocomplete="off" placeholder="https://…" spellcheck="false"><p class="muted small">支持 Zoom、Google Meet、Microsoft Teams。请粘贴完整链接，包括链接中的入会密码。</p><label for="bot-name">会议里显示的机器人名称</label><input id="bot-name" value="Vexa · 会议助手" maxlength="60"><label for="vexa-language">转写语言</label><select id="vexa-language"><option value="">自动识别</option><option value="zh">中文</option><option value="en">英文</option></select><p class="consent-note">加入前，请告知参会者将使用 AI 转写。会议音频会由 Vexa 云端处理；此入口关闭持久音频录制。</p><button id="vexa-start" class="primary full" disabled>让 Vexa 加入会议</button><p class="feedback" id="vexa-action-message" role="status">验证 Key 后，即可提交你自己的会议链接。</p></section>
+        <section class="card how-card"><div class="section-title"><span class="step">03</span><h2>第一次怎么试</h2></div><ol><li>在 Zoom／Meet／Teams 开一个测试会议。</li><li>将完整邀请链接粘贴到上方，点击加入。</li><li>若机器人在等候室，由主持人允许入会。</li><li>说几句话，等文字出现，再点击整理纪要。</li></ol><p class="muted small">这里体验 Vexa 的入会与转写。MOSS 的实时语音仍在另一个入口；这一步尚未把它的声音送入线上会议。</p></section>
+      </aside>
+      <div class="main-column">
+        <section class="card vexa-connection"><div class="meeting-top"><div><span class="live-dot" id="vexa-live-dot"></span><span id="vexa-status">准备连接</span></div><span class="badge">Zoom / Meet / Teams</span></div><div class="connection-graphic" aria-hidden="true"><span>会议</span><i>→</i><span>Vexa</span><i>→</i><span>Codex</span></div><h2 id="vexa-title">给线上会议配一个记录员</h2><p class="muted" id="vexa-description">连接云服务后，真实的会议转写会显示在下方。</p><div class="vexa-controls"><button id="vexa-refresh" class="secondary" disabled>刷新转写</button><button id="vexa-stop" class="danger" disabled>让机器人退出</button></div><p class="muted small" id="vexa-sync">约每 4 秒刷新；出现文字的速度取决于 Vexa 转写。</p><div class="notice" id="vexa-notice" role="status" hidden></div></section>
+        <section class="card transcript-card"><div class="section-title"><h2>实时会议转写</h2><span class="muted small" id="vexa-count">0 段</span><button id="vexa-export" class="text-button push-right" disabled>导出文字 ↓</button></div><div id="vexa-transcript" aria-live="polite"><div class="empty"><span>等待第一段真实的会议发言。</span><p>机器人需先成功入会，才会收到远端音频。</p></div></div></section>
+        <section class="card summary-card"><div class="section-title"><h2>Codex 会议纪要</h2><button id="vexa-summarize" class="secondary push-right" disabled>整理当前纪要</button></div><p class="muted small">点击后，将当前已确认的转写发送给你已登录的 Codex，生成结论和待办。</p><p class="feedback" id="vexa-summary-message" role="status"></p><pre id="vexa-summary">会议有了内容，就可以开始整理。</pre></section>
+      </div>
+    </div>
+    <footer>Vexa Cloud：入会与转写 · Codex：整理纪要 · 使用各自账户额度 · 关闭页面不会让云端机器人退出，请使用「让机器人退出」</footer>
+  </main>
+  <script type="module" src="/vexa.js"></script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+{
+  "name": "meeting-companion",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MOSS-Live + Vexa Cloud + Codex 会议工作台",
+  "scripts": {
+    "start": "node start.mjs",
+    "test": "node --test test/*.test.mjs",
+    "preview": "node scripts/preview.mjs",
+    "build:cloud": "node scripts/build-cloud.mjs",
+    "preview:cloud": "node scripts/cloud-preview.mjs"
+  },
+  "dependencies": {
+    "ws": "8.22.1"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

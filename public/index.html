@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MOSS · 会议搭子</title><link rel="stylesheet" href="/style.css"></head>
+<body>
+  <header><div class="brand"><span class="brand-mark">m</span><span>MOSS<span class="brand-sub">会议搭子</span></span></div><div class="header-right"><span class="local-tag">本机运行 · Windows</span><button class="text-button" id="shutdown">退出服务</button></div></header>
+  <main>
+    <nav class="service-nav" aria-label="会议方式"><a href="/" aria-current="page">现场语音 · MOSS</a><a href="/vexa" target="_blank" rel="noopener">线上会议 · Vexa ↗</a><span>MOSS 交流 · Vexa 转写 · Codex 整理</span></nav>
+    <section class="intro"><div class="eyebrow">REALTIME MEETING COMPANION</div><h1>让 AI 坐到会议桌旁。</h1><p>一起听、一起讨论。需要查资料时，让后台助手接着做。</p></section>
+    <div class="layout">
+      <aside>
+        <section class="card setup"><div class="section-title"><span class="step">01</span><h2>连接 MOSS</h2><span id="key-badge" class="badge">待填写</span></div><label for="api-key">MOSS API Key</label><div class="key-line"><input id="api-key" type="password" autocomplete="off" spellcheck="false" placeholder="在这里粘贴你的密钥"><button id="save-key" class="secondary">验证</button></div><p class="muted small">密钥只保留在本机服务内存中，退出后清除。</p><a href="https://platform.moss.cn/app/api-keys" target="_blank" rel="noreferrer">前往 MOSS 控制台获取密钥 ↗</a><p id="key-message" class="feedback" role="status"></p></section>
+        <section class="card"><div class="section-title"><span class="step">02</span><h2>会议设置</h2></div><label for="nickname">怎么称呼 AI</label><input id="nickname" value="小莫" maxlength="20"><label for="mode">参与方式</label><select id="mode"><option value="participate">参与讨论 · 被叫到时回应</option><option value="listen">安静旁听 · 被叫到时总结</option></select><label for="microphone">麦克风</label><select id="microphone"><option value="">系统默认麦克风</option></select><button id="refresh-devices" class="text-button refresh">刷新设备列表</button><p class="muted small">线下多人会议：将电脑放在桌面中间。开始后，音频会发送给 MOSS 处理。</p></section>
+        <section class="card backend"><div class="section-title"><span class="step">03</span><h2>后台助手</h2><span class="badge" id="backend-badge">Codex</span></div><p>需要查询天气、活动或核对信息时，小莫会把任务交给 Codex。</p><button id="test-backend" class="secondary full">检测后台连接</button><p id="backend-message" class="feedback" role="status">使用电脑上已有的 Codex 登录。</p></section>
+      </aside>
+      <div class="main-column">
+        <section class="card meeting" id="meeting-panel"><div class="meeting-top"><div><span class="live-dot" id="live-dot"></span><span id="connection-label">准备开始</span></div><time id="duration">00:00</time></div><div class="orb-wrap"><div class="orb" id="orb"><span></span><span></span><span></span></div></div><h2 id="meeting-title">给 AI 留一张椅子</h2><p id="meeting-subtitle">填入密钥后，点击开始，让小莫加入你的讨论。</p><div class="sound-level"><span>麦克风</span><meter id="mic-level" min="0" max="1" value="0"></meter></div><div class="controls"><button id="start" class="primary" disabled>开始会议</button><button id="mute" class="secondary" disabled>暂停收音</button><button id="stop" class="danger" disabled>结束会议</button></div><p class="live-hint">支持边听边说 · 可随时打断 · 中文实时字幕</p><div id="notice" class="notice" role="status" hidden></div></section>
+        <section class="card transcript-card"><div class="section-title"><h2>桌边对话</h2><span id="transcript-count" class="muted small">0 条</span><button id="export" class="text-button push-right">导出文字 ↓</button></div><div id="transcript" aria-live="polite"><div class="empty" id="empty"><span>“小莫，先听我们讨论，待会儿帮忙整理结论。”</span><p>对话开始后，双方字幕会显示在这里。</p></div></div></section>
+        <section class="card tasks-card"><div class="section-title"><h2>后台正在做什么</h2><span class="muted small">查询期间可继续交谈</span></div><div id="tasks"><p class="muted small" id="tasks-empty">试着说：“小莫，查一下上海和杭州明天的天气，我们继续讨论。”</p></div></section>
+      </div>
+    </div>
+    <footer>语音：MOSS-Live · 任务执行：Codex · 字幕仅保留在当前页面，可手动导出</footer>
+  </main>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

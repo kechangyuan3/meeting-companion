@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Vexa · 线上会议</title><link rel="stylesheet" href="./style.css"><link rel="stylesheet" href="./vexa.css"></head>
+<body>
+  <header><div class="brand"><span class="brand-mark">m</span><span>会议搭子<span class="brand-sub">多服务工作台</span></span></div><div class="header-right"><span class="local-tag">公开交互演示</span><span class="cloud-label">Vexa 演示</span></div></header><div class="demo-banner"><strong>示例模式</strong><span>所有内容为预设演示；不会录音、调用 API 或加入会议。</span><a href="https://github.com/kechangyuan3/meeting-companion" target="_blank" rel="noopener noreferrer">GitHub 源码 ↗</a></div>
+  <main>
+    <nav class="service-nav" aria-label="会议方式"><a href="./index.html">现场语音 · MOSS ↗</a><a href="./vexa.html" aria-current="page">线上会议 · Vexa</a><span>MOSS 交流 · Vexa 转写 · Codex 整理</span></nav>
+    <section class="intro"><div class="eyebrow">ONLINE MEETING / VEXA + CODEX</div><h1>会议在别处，内容在这里。</h1><p>让 Vexa 加入你的线上会议，实时记录发言，再交给 Codex 整理结论。</p></section>
+    <div class="layout vexa-layout">
+      <aside>
+        <section class="card setup"><div class="section-title"><span class="step">01</span><h2>Vexa 流程演示</h2><span class="badge ready">无需 Key</span></div><p class="muted small">体验机器人入会、发言者转写和整理纪要的界面。示例数据保存在页面中。</p><a href="https://github.com/kechangyuan3/meeting-companion#本地真实使用" target="_blank" rel="noopener noreferrer">下载源码，使用自己的 Vexa Key ↗</a></section>
+        <section class="card"><div class="section-title"><span class="step">02</span><h2>选择线上会议</h2></div><label for="meeting-url">示例会议链接</label><input id="meeting-url" value="https://meet.google.com/abc-defg-hij" type="url" autocomplete="off" placeholder="https://…" spellcheck="false"><p class="muted small">此处展示示例链接；点击按钮不会向外发送入会请求。</p><label for="bot-name">会议里显示的机器人名称</label><input id="bot-name" value="Vexa · 会议助手" maxlength="60"><label for="vexa-language">转写语言</label><select id="vexa-language"><option value="">自动识别</option><option value="zh">中文</option><option value="en">英文</option></select><p class="consent-note">这里展示预设的会议转写流程，不会使用真实 Key 或读取你的会议。</p><button id="vexa-start" class="primary full">开始转写演示</button><p class="feedback" id="vexa-action-message" role="status">直接点击开始，体验示例流程。</p></section>
+        <section class="card how-card"><div class="section-title"><span class="step">03</span><h2>下载后如何真实使用</h2></div><ol><li>在 Zoom／Meet／Teams 开一个测试会议。</li><li>将完整邀请链接粘贴到上方，点击加入。</li><li>若机器人在等候室，由主持人允许入会。</li><li>说几句话，等文字出现，再点击整理纪要。</li></ol><p class="muted small">这里体验 Vexa 的入会与转写。MOSS 的实时语音仍在另一个入口；这一步尚未把它的声音送入线上会议。</p></section>
+      </aside>
+      <div class="main-column">
+        <section class="card vexa-connection"><div class="meeting-top"><div><span class="live-dot" id="vexa-live-dot"></span><span id="vexa-status">准备连接</span></div><span class="badge">Zoom / Meet / Teams</span></div><div class="connection-graphic" aria-hidden="true"><span>会议</span><i>→</i><span>Vexa</span><i>→</i><span>Codex</span></div><h2 id="vexa-title">给线上会议配一个记录员</h2><p class="muted" id="vexa-description">点击开始后，预设的示例发言会逐段出现。</p><div class="vexa-controls"><button id="vexa-refresh" class="secondary" disabled>刷新转写</button><button id="vexa-stop" class="danger" disabled>结束演示</button></div><p class="muted small" id="vexa-sync">点击开始，查看逐段出现的预设发言。</p><div class="notice" id="vexa-notice" role="status" hidden></div></section>
+        <section class="card transcript-card"><div class="section-title"><h2>会议转写示例</h2><span class="muted small" id="vexa-count">0 段</span><button id="vexa-export" class="text-button push-right" disabled>导出文字 ↓</button></div><div id="vexa-transcript" aria-live="polite"><div class="empty"><span>等待示例对话开始。</span><p>此页面不会连接真实机器人。</p></div></div></section>
+        <section class="card summary-card"><div class="section-title"><h2>Codex 会议纪要</h2><button id="vexa-summarize" class="secondary push-right" disabled>整理当前纪要</button></div><p class="muted small">点击按钮后显示基于示例发言预先编写的纪要；不会调用 Codex。</p><p class="feedback" id="vexa-summary-message" role="status"></p><pre id="vexa-summary">会议有了内容，就可以开始整理。</pre></section>
+      </div>
+    </div>
+    <footer>所有记录和纪要均为预设示例 · 真实使用请下载源码，在本机填写自己的 Key</footer>
+  </main>
+  <script type="module" src="./demo-vexa.js"></script>
+</body>
+</html>
+
