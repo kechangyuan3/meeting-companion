@@ -90,8 +90,8 @@ export function createCloudApp({fetchImpl=fetch,assets={},siteOrigin,pairFactory
       try{
         const data=await readBody(request);
         if(!data||typeof data!=='object'||Array.isArray(data))throw new VexaError('请求格式不正确。',400);
-        if(path==='/api/moss/verify'){await upstream(MOSS,'/v1/models',credential(request.headers.get('X-Service-Key')));return json({ok:true});}
-        const key=credential(request.headers.get('X-Service-Key'));
+        if(path==='/api/moss/verify'){await upstream(MOSS,'/v1/models',credential(request.headers.get('Authorization')?.match(/^Bearer (.+)$/i)?.[1]));return json({ok:true});}
+        const key=credential(request.headers.get('Authorization')?.match(/^Bearer (.+)$/i)?.[1]);
         if(path==='/api/vexa/verify'){await upstream(VEXA,'/meetings?limit=1',key);return json({ok:true});}
         if(path==='/api/vexa/start'){
           const parsed=parseMeetingUrl(data.meetingUrl),botName=String(data.botName||'Vexa · 会议助手').trim();
@@ -116,3 +116,4 @@ export function createCloudApp({fetchImpl=fetch,assets={},siteOrigin,pairFactory
   }};
 }
 export default createCloudApp({assets:typeof WORKER_ASSETS==='undefined'?{}:WORKER_ASSETS,siteOrigin:typeof SITE_ORIGIN==='undefined'?undefined:SITE_ORIGIN});
+

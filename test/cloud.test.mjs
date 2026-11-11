@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createCloudApp} from '../worker/index.js';
 const origin='https://meeting.example';
-const req=(path,key,data={},from=origin)=>new Request(origin+path,{method:'POST',headers:{Origin:from,'X-Service-Key':key,'Content-Type':'application/json'},body:JSON.stringify(data)});
+const req=(path,key,data={},from=origin)=>new Request(origin+path,{method:'POST',headers:{Origin:from,Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify(data)});
 const reply=(value,status=200)=>new Response(JSON.stringify(value),{status});
 test('cloud callers own their credentials; concurrent Vexa calls never use another visitor key',async()=>{
   const seen=[];
@@ -50,3 +50,4 @@ test('cloud WebSockets isolate auth, relay actual binary frames, and cancel only
   pairs[0][1].close();assert.equal(remotes[0].readyState,3);assert.equal(remotes[1].readyState,1);
   pairs[1][1].close();
 });
+
