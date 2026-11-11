@@ -30,6 +30,14 @@ test('cloud rejects foreign origins, missing credentials, malformed bodies and a
   assert.equal((await app.fetch(req('/api/moss/verify','key-for-alice',null))).status,400);
   assert.equal(calls,0);
 });
+test('Worker fetch accepts manual redirects and never forwards credentials to a redirect destination',async()=>{
+  let calls=0;const app=createCloudApp({fetchImpl:async(url,options)=>{
+    if(options.redirect==='error')throw new TypeError('Workers does not implement redirect:error');
+    calls++;assert.match(url,/^https:\/\/api\.cloud\.vexa\.ai\//);
+    return new Response(null,{status:302,headers:{Location:'https://attacker.invalid/collect'}});
+  }});
+  const response=await app.fetch(req('/api/vexa/verify','key-for-alice'));assert.equal(response.status,502);assert.equal(calls,1);assert.doesNotMatch(await response.text(),/key-for-alice/);
+});
 class Socket extends EventTarget{
   readyState=0;sent=[];accept(){this.readyState=1;}send(value){this.sent.push(value);}close(){if(this.readyState===3)return;this.readyState=3;this.dispatchEvent(new Event('close'));}emit(value){const event=new Event('message');Object.defineProperty(event,'data',{value});this.dispatchEvent(event);}
 }

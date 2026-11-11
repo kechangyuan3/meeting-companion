@@ -25,8 +25,9 @@ function nativeKey(data){
 export function createCloudApp({fetchImpl=fetch,assets={},siteOrigin,pairFactory=()=>new WebSocketPair(),upgradeResponse=client=>new Response(null,{status:101,webSocket:client})}={}){
   async function upstream(base,path,key,{method='GET',data}={}){
     let response;
-    try{response=await fetchImpl(`${base}${path}`,{method,headers:{...(base===MOSS?{Authorization:`Bearer ${key}`}:{'X-API-Key':key}),...(data?{'Content-Type':'application/json'}:{})},...(data?{body:JSON.stringify(data)}:{}),signal:AbortSignal.timeout(25000),redirect:'error'});}
+    try{response=await fetchImpl(`${base}${path}`,{method,headers:{...(base===MOSS?{Authorization:`Bearer ${key}`}:{'X-API-Key':key}),...(data?{'Content-Type':'application/json'}:{})},...(data?{body:JSON.stringify(data)}:{}),signal:AbortSignal.timeout(25000),redirect:'manual'});}
     catch{throw new VexaError(`无法连接 ${base===MOSS?'MOSS':'Vexa'}，请检查网络后重试。`,502);}
+    if(response.status>=300&&response.status<400)throw new VexaError('服务返回了非预期跳转，连接已停止，请从官方控制台检查服务地址。',502);
     if(!response.ok){
       const provider=base===MOSS?'MOSS':'Vexa';
       const messages={401:`${provider} Key 无效，请从官方账户页复制完整密钥。`,402:`${provider} 账户额度不足。`,403:`${provider} 拒绝访问，请检查 Key 权限、额度和并发限制。`,404:'该会议的转写记录尚未生成，或该 Key 无权访问。',409:'该会议已有机器人或状态冲突，请检查服务控制台。',422:'会议参数不被接受，请检查完整邀请链接和入会密码。',429:'请求频率或并发数超过服务限制，请稍后重试。',503:'服务或转写引擎暂未就绪，请稍后重试。'};
@@ -49,7 +50,7 @@ export function createCloudApp({fetchImpl=fetch,assets={},siteOrigin,pairFactory
           if(typeof event.data!=='string'||event.data.length>8192)throw new VexaError('请先验证密钥再开始。');
           const auth=JSON.parse(event.data);if(auth.action!=='local.authenticate')throw new VexaError('缺少会话认证。');
           const key=credential(auth.apiKey);state='connecting';
-          const response=await fetchImpl(`${MOSS}/v1/realtime?model=moss-live-1.0`,{headers:{Upgrade:'websocket',Authorization:`Bearer ${key}`},redirect:'error',signal:AbortSignal.timeout(25000)});
+          const response=await fetchImpl(`${MOSS}/v1/realtime?model=moss-live-1.0`,{headers:{Upgrade:'websocket',Authorization:`Bearer ${key}`},redirect:'manual',signal:AbortSignal.timeout(25000)});
           if(response.status!==101||!response.webSocket)throw new VexaError(`MOSS 拒绝连接（HTTP ${response.status}），请检查 Key、模型权限和额度。`);
           remote=response.webSocket;remote.binaryType='arraybuffer';
           if(state==='closed'){try{remote.close(1000,'页面连接已结束');}catch{}return;}
@@ -116,4 +117,5 @@ export function createCloudApp({fetchImpl=fetch,assets={},siteOrigin,pairFactory
   }};
 }
 export default createCloudApp({assets:typeof WORKER_ASSETS==='undefined'?{}:WORKER_ASSETS,siteOrigin:typeof SITE_ORIGIN==='undefined'?undefined:SITE_ORIGIN});
+
 
