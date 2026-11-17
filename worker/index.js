@@ -1,19 +1,25 @@
 import {VexaError,parseMeetingUrl,normalizeSegments} from '../vexa-shared.mjs';
 import {validateRequest,filterEvent} from '../runtime/public-api.mjs';
+import {recapRoute,RecapError} from '../runtime/moss-recap.mjs';
+import {XfError,xfCredentials,xfOptions,xfSignedUrl,xfFrame,xfParse,xfErrorMessage} from '../runtime/xf-live.mjs';
 
 const VEXA='https://api.cloud.vexa.ai';
 const MOSS='https://api.mosi.cn';
 const allowedActions=new Set(['media.mode','mic_state','playback.chunk.completed','playback.completed','playback.stopped','session.update','conversation.item.create','response.create','ping']);
 const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 function credential(value){const key=String(value||'').trim();if(key.length<8||key.length>4096||/[\r\n]/.test(key))throw new VexaError('请填写完整的 API Key。',400);return key;}
-async function readBody(request){
-  if(Number(request.headers.get('Content-Length'))>65536)throw new VexaError('请求过大。',413);
-  const reader=request.body?.getReader();if(!reader)return {};
+async function readBytes(request,limit=65536,ErrorType=VexaError){
+  if(Number(request.headers.get('Content-Length'))>limit)throw new ErrorType('请求过大。',413);
+  const reader=request.body?.getReader();if(!reader)return new Uint8Array();
   const chunks=[];let size=0;
-  try {while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>65536){await reader.cancel();throw new VexaError('请求过大。',413);}chunks.push(value);}}
+  try {while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>limit){await reader.cancel();throw new ErrorType('请求过大。',413);}chunks.push(value);}}
   finally{reader.releaseLock();}
   const bytes=new Uint8Array(size);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length;}
-  try{return JSON.parse(new TextDecoder().decode(bytes)||'{}');}catch{throw new VexaError('请求格式不正确。',400);}
+  return bytes;
+}
+async function readBody(request,limit=65536,ErrorType=VexaError){
+  const bytes=await readBytes(request,limit,ErrorType);
+  try{return JSON.parse(new TextDecoder().decode(bytes)||'{}');}catch{throw new ErrorType('请求格式不正确。',400);}
 }
 function nativeKey(data){
   const platform=data.platform,id=String(data.nativeMeetingId||'');
@@ -81,13 +87,78 @@ export function createCloudApp({fetchImpl=fetch,assets={},siteOrigin,pairFactory
     server.addEventListener('close',()=>finish());server.addEventListener('error',()=>finish('',1011));
     return upgradeResponse(client);
   }
+  // 讯飞星火「超拟人交互」：页面先发 local.authenticate（APPID、APIKey、APISecret 和会话选项），之后只发 16 kHz PCM 二进制帧。
+  // 服务端把 PCM 包成讯飞请求帧，把讯飞回复拆成字幕事件（JSON）和 24 kHz PCM 音频（二进制）转给页面。
+  async function xfOpen(credentials){
+    let response;
+    try{response=await fetchImpl(await xfSignedUrl(credentials),{headers:{Upgrade:'websocket'},redirect:'manual',signal:AbortSignal.timeout(20000)});}
+    catch{throw new XfError('无法连接讯飞，请检查网络后重试。',502);}
+    if(response.status!==101||!response.webSocket)throw new XfError(response.status===401||response.status===403?'讯飞拒绝了签名：请核对 APIKey 和 APISecret，并确认电脑时间准确。':`讯飞拒绝连接（HTTP ${response.status}），请检查 APPID、APIKey、APISecret 和超拟人交互服务是否已开通。`,502);
+    return response.webSocket;
+  }
+  function connectXf(request){
+    if(request.headers.get('Upgrade')?.toLowerCase()!=='websocket')return json({error:'需要 WebSocket 连接。'},426);
+    const [client,server]=Object.values(pairFactory());server.accept();server.binaryType='arraybuffer';
+    let remote=null,state='waiting',credentials,options,first=true;
+    const send=value=>{try{if(server.readyState===1)server.send(typeof value==='string'||value instanceof ArrayBuffer?value:JSON.stringify(value));}catch{}};
+    const finish=(message='',code=1000)=>{
+      if(state==='closed')return;const wasReady=state==='ready';state='closed';clearTimeout(timer);if(message)send({type:'local.error',message});
+      try{if(wasReady&&remote?.readyState===1&&!first)remote.send(JSON.stringify(xfFrame(credentials,options,{status:2})));}catch{}
+      try{remote?.close(1000,'会话结束');}catch{}try{server.close(code,'会话结束');}catch{}
+    };
+    const timer=setTimeout(()=>finish('讯飞会话建立超时，请重新开始。',1008),30000);
+    server.addEventListener('message',async event=>{
+      if(state==='closed')return;
+      try{
+        if(state==='waiting'){
+          if(typeof event.data!=='string'||event.data.length>8192)throw new XfError('请先验证讯飞密钥再开始。');
+          const auth=JSON.parse(event.data);if(auth.action!=='local.authenticate')throw new XfError('缺少会话认证。');
+          credentials=xfCredentials(auth);options=xfOptions(auth);state='connecting';
+          remote=await xfOpen(credentials);remote.binaryType='arraybuffer';
+          if(state==='closed'){try{remote.close(1000,'页面连接已结束');}catch{}return;}
+          remote.addEventListener('message',incoming=>{
+            if(state==='closed')return;
+            try{
+              if(typeof incoming.data!=='string')return;
+              const {event:value,audio}=xfParse(incoming.data);
+              if(value.code!==0)return finish(xfErrorMessage(value.code,value.message),1011);
+              send(value);if(audio?.byteLength)send(audio.buffer.slice(audio.byteOffset,audio.byteOffset+audio.byteLength));
+            }catch{finish('讯飞实时语音协议处理失败，请重新开始。',1011);}
+          });
+          remote.addEventListener('close',()=>finish(state==='ready'?'讯飞实时连接已结束（单次连接最长 30 分钟）。':''));
+          remote.addEventListener('error',()=>finish('讯飞实时连接出现错误，请重试。',1011));
+          remote.accept();state='ready';clearTimeout(timer);send({type:'xf.ready'});
+          return;
+        }
+        if(state!=='ready'||remote?.readyState!==1)throw new XfError('会话尚未就绪。');
+        if(typeof event.data==='string'){
+          const value=JSON.parse(event.data);
+          if(value?.action==='local.end')return finish();
+          throw new XfError('不支持的会话操作。');
+        }
+        if(event.data.byteLength>64000)throw new XfError('音频片段过大。');
+        remote.send(JSON.stringify(xfFrame(credentials,options,{status:first?0:1,audio:new Uint8Array(event.data)})));first=false;
+      }catch(error){finish(error instanceof XfError?error.message:state==='connecting'?'无法建立讯飞实时会话，请检查密钥和服务状态。':'实时会话请求未被接受，请重新开始。',1008);}
+    });
+    server.addEventListener('close',()=>finish());server.addEventListener('error',()=>finish('',1011));
+    return upgradeResponse(client);
+  }
   return {async fetch(request){
     const url=new URL(request.url),path=url.pathname;
-    if(path.startsWith('/api/')||path==='/connect'){
+    if(path.startsWith('/api/')||path==='/connect'||path==='/connect-xf'){
       const origin=request.headers.get('Origin');
       if(!origin||![url.origin,siteOrigin].filter(Boolean).includes(origin))return json({error:'请求来源不正确。'},403);
       if(path==='/connect')return request.method==='GET'?connect(request):json({error:'方法不支持。'},405);
+      if(path==='/connect-xf')return request.method==='GET'?connectXf(request):json({error:'方法不支持。'},405);
+      if(path==='/api/xf/verify'&&request.method==='POST'){
+        try{const remote=await xfOpen(xfCredentials(await readBody(request,8192,XfError)));try{remote.accept();remote.close(1000,'验证完成');}catch{}return json({ok:true});}
+        catch(error){return json({error:error instanceof XfError?error.message:'验证未能完成，请稍后重试。'},error.status||502);}
+      }
       if(request.method!=='POST')return json({error:'请通过页面操作。'},405);
+      if(path==='/api/moss/transcribe'||path==='/api/moss/task'||path==='/api/moss/summary'){
+        let key='';try{key=credential(request.headers.get('Authorization')?.match(/^Bearer (.+)$/i)?.[1]);}catch{}
+        return recapRoute(path,{key,fetchImpl,contentType:request.headers.get('Content-Type'),keyterms:request.headers.get('X-Keyterms'),readBytes:limit=>readBytes(request,limit,RecapError),readJson:limit=>readBody(request,limit,RecapError)});
+      }
       try{
         const data=await readBody(request);
         if(!data||typeof data!=='object'||Array.isArray(data))throw new VexaError('请求格式不正确。',400);

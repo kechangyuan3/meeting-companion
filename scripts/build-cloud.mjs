@@ -11,9 +11,11 @@ let protocol=await readFile(join(root,'runtime/public-api.mjs'),'utf8');
 protocol=protocol.replace(/^import fields[^\n]*\n/,'').replace(/^export /gm,'');
 const fields=await readFile(join(root,'runtime/public-fields.json'),'utf8');
 const shared=(await readFile(join(root,'vexa-shared.mjs'),'utf8')).replace(/^export /gm,'');
+const recap=(await readFile(join(root,'runtime/moss-recap.mjs'),'utf8')).replace(/^export /gm,'');
+const xf=(await readFile(join(root,'runtime/xf-live.mjs'),'utf8')).replace(/^export /gm,'');
 const worker=(await readFile(join(root,'worker/index.js'),'utf8')).replace(/^import [^\n]*\n/gm,'');
 const origin=process.env.SITE_ORIGIN || 'https://meeting-companion-kechangyuan3.happymorel8.chatgpt.site';
-const bundle=`const WORKER_ASSETS=${JSON.stringify(assets)};\nconst SITE_ORIGIN=${JSON.stringify(origin)};\n${shared}\nconst {validateRequest,filterEvent}=(()=>{const fields=${fields};\n${protocol}\nreturn {validateRequest,filterEvent};})();\n${worker}`;
+const bundle=`const WORKER_ASSETS=${JSON.stringify(assets)};\nconst SITE_ORIGIN=${JSON.stringify(origin)};\n${shared}\n${recap}\n${xf}\nconst {validateRequest,filterEvent}=(()=>{const fields=${fields};\n${protocol}\nreturn {validateRequest,filterEvent};})();\n${worker}`;
 await mkdir(join(root,'dist/server'),{recursive:true});await mkdir(join(root,'dist/.openai'),{recursive:true});
 await writeFile(join(root,'dist/server/index.js'),bundle);await writeFile(join(root,'dist/.openai/hosting.json'),JSON.stringify(manifest,null,2)+'\n');
 // Remove only the known obsolete static output files; preserve the source demo/.

@@ -8,18 +8,32 @@ import {createDelegationBridge} from './vendor/mosslive/sdk/index.mjs';
 import {validateRequest, filterEvent} from './runtime/public-api.mjs';
 import {createCodexRunner} from './codex-runner.mjs';
 import {createVexaClient} from './vexa-client.mjs';
+import {recapRoute, RecapError} from './runtime/moss-recap.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
-const assets = new Set(['index.html', 'app.js', 'style.css', 'vexa.html', 'vexa.js', 'vexa.css', 'media/mic.js', 'media/pcm.js', 'media/capture-worklet.js', 'media/speaker.js', 'media/playback.js', 'media/public-session.js']);
+const assets = new Set(['index.html', 'app.js', 'style.css', 'vexa.html', 'vexa.js', 'vexa.css', 'media/mic.js', 'media/pcm.js', 'media/capture-worklet.js', 'media/speaker.js', 'media/playback.js', 'media/public-session.js', 'media/recorder.js', 'recap.js']);
 const allowedActions = new Set(['media.mode', 'mic_state', 'playback.chunk.completed', 'playback.completed', 'playback.stopped', 'session.update', 'conversation.item.create', 'response.create', 'ping']);
 const json = (res, status, value) => {res.writeHead(status, {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'}); res.end(JSON.stringify(value));};
 async function body(req) {
   let bytes = ''; for await (const chunk of req) {bytes += chunk; if (bytes.length > 65536) throw Error('请求过大');}
   return JSON.parse(bytes || '{}');
 }
+async function rawBody(req, limit) {
+  if (Number(req.headers['content-length']) > limit) throw new RecapError('录音文件过大。', 413);
+  const chunks = []; let size = 0;
+  for await (const chunk of req) {size += chunk.length; if (size > limit) throw new RecapError('录音文件过大。', 413); chunks.push(chunk);}
+  return new Uint8Array(Buffer.concat(chunks));
+}
+async function sendResponse(res, response) {
+  res.writeHead(response.status, Object.fromEntries(response.headers));
+  try {if (response.body) for await (const chunk of response.body) {if (res.destroyed) break; res.write(chunk);}}
+  catch {res.destroy(); return;}
+  res.end();
+}
+const recapPaths = new Set(['/api/moss/transcribe', '/api/moss/task', '/api/moss/summary']);
 
 export async function startMeeting({port = 17860, apiKey = process.env.MOSS_API_KEY || '', codexPath, proxyUrl, run: suppliedRun,
-  upstreamUrl = 'wss://api.mosi.cn/v1/realtime?model=moss-live-1.0', verifyKey, vexaBaseUrl, vexaFetch} = {}) {
+  upstreamUrl = 'wss://api.mosi.cn/v1/realtime?model=moss-live-1.0', verifyKey, vexaBaseUrl, vexaFetch, mossFetch = fetch} = {}) {
   const cookie = randomBytes(32).toString('hex');
   let authority, active, verified = false, lastError = '', closed = false, backendTest = null;
   const metrics = {connections: 0, audioIn: 0, audioOut: 0, inputTurns: 0, outputTurns: 0, playbackReceipts: 0, tasksCompleted: 0, taskCount: 0, lastEvent: ''};
@@ -34,6 +48,11 @@ export async function startMeeting({port = 17860, apiKey = process.env.MOSS_API_
       if (!authorized(req)) return json(res, 403, {error: '请先打开本机首页。'});
       if (req.method !== 'GET' && req.headers.origin !== `http://${authority}`) return json(res, 403, {error: '请求来源不正确。'});
       try {
+        if (recapPaths.has(path) && req.method === 'POST') return await sendResponse(res, await recapRoute(path, {
+          key: apiKey, fetchImpl: mossFetch, contentType: req.headers['content-type'], keyterms: req.headers['x-keyterms'],
+          readBytes: limit => rawBody(req, limit),
+          readJson: async limit => {try {return JSON.parse(Buffer.from(await rawBody(req, limit)).toString('utf8') || '{}');} catch (error) {throw error instanceof RecapError ? error : new RecapError('请求格式不正确。');}},
+        }));
         if (path.startsWith('/api/vexa/')) return json(res, 200, await vexa.handle(path, req.method, req.method === 'POST' ? await body(req) : {}));
         if (path === '/api/status' && req.method === 'GET') return json(res, 200, {
           configured: !!apiKey, verified, backend: 'Codex', backendAvailable: !!(codexPath || suppliedRun), connected: !!active?.attached,

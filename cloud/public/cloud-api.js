@@ -1,4 +1,4 @@
-// Each browser document owns these variables. No key enters localStorage or cookies.
+// Each browser document owns these runtime variables. No key enters localStorage or cookies.
 let mossKey='',vexaKey='',meeting=null;
 const terminal=new Set(['completed','failed','stopped','ended','evicted','cancelled','error']);
 const summary={state:'idle',text:'',error:''};
@@ -19,6 +19,8 @@ export async function mossApi(path,data){
   if(path==='/api/shutdown'||path==='/api/forget-key'){mossKey='';return {ok:true};}
   throw Error('在线版提供实时语音；Codex 后台任务请使用本机版本。');
 }
+// 会后整理请求：附上当前页面内存里的 MOSS Key，经本站中转到 MOSS。
+export function mossRequest(path,init={}){if(!mossKey)return Promise.reject(Error('MOSS Key 已清除，请重新填写并验证后再生成。'));return fetch(path,{...init,headers:{...(init.headers||{}),Authorization:'Bearer '+mossKey}});}
 export function authenticateMoss(socket){socket.send(JSON.stringify({action:'local.authenticate',apiKey:mossKey}));}
 export async function vexaApi(path,data){
   const action=path.replace('/api/vexa/','');
@@ -41,5 +43,20 @@ export async function vexaApi(path,data){
   }
   throw Error('在线版可导出转写；使用本机版本可调用 Codex 整理纪要。');
 }
-window.addEventListener('pagehide',()=>{mossKey='';vexaKey='';});
+// 讯飞星火「超拟人交互」：APPID、APIKey、APISecret 只保留在当前页面内存，开始会议时随实时连接发给本站签名。
+let xfKey=null;
+export async function xfConfigure(values){
+  const data={appId:String(values.appId||'').trim(),apiKey:String(values.apiKey||'').trim(),apiSecret:String(values.apiSecret||'').trim()};
+  if(!data.appId||!data.apiKey||!data.apiSecret)throw Error('请把 APPID、APIKey、APISecret 三项都填上。');
+  let response;try{response=await fetch('/api/xf/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),signal:AbortSignal.timeout(30000)});}catch{throw Error('连接超时或网络不可达，请稍后重试。');}
+  let value;try{value=await response.json();}catch{throw Error('在线服务暂未响应，请稍后重试。');}
+  if(!response.ok)throw Error(value.error||`验证失败（HTTP ${response.status}）。`);
+  xfKey=data;return {ok:true};
+}
+export const xfConfigured=()=>!!xfKey;
+export const currentXfCredentials=()=>xfKey ? {...xfKey} : null;
+export const mossConfigured=()=>!!mossKey;
+export function authenticateXf(socket,options){socket.send(JSON.stringify({action:'local.authenticate',...xfKey,...options}));}
+export function xfForget(){xfKey=null;}
+window.addEventListener('pagehide',()=>{mossKey='';vexaKey='';xfKey=null;});
 

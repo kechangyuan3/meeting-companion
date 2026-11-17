@@ -1,15 +1,20 @@
 import {Microphone} from './media/mic.js';
 import {Speaker} from './media/speaker.js';
 import {PublicSession} from './media/public-session.js';
+import {MeetingRecorder} from './media/recorder.js';
+import {createRecap} from './recap.js';
 
 const $ = id => document.getElementById(id);
 let configured = false, socket, microphone, session, audio, ticker, elapsedTimer, startedAt, epoch = 0, muted = false;
 let preservedError = false, backendPolling = null;
+let recorder = null, meetingEpoch = 0, meetingStartedAt = 0;
 const messages = new Map(), taskCards = new Map();
 const api = async (path, data) => {
   const response = await fetch(path, data === undefined ? {} : {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)});
   const value = await response.json(); if (!response.ok) throw Error(value.error || '请求失败'); return value;
 };
+// 会后整理（MOSS-Transcribe-Diarize-Pro 分人转写 + Nex N2.6 纪要），Key 由本机服务保管。
+const recap = createRecap({request: (path, init) => fetch(path, init), $});
 function feedback(id, text, type = '') {$(id).textContent = text; $(id).className = `feedback ${type}`;}
 function notice(text) {$('notice').textContent = text; $('notice').hidden = !text;}
 function status(kind, title, subtitle) {
@@ -81,13 +86,22 @@ function task(message) {
   card.label.textContent = ({queued: '排队中', running: '查询中', progress: '进行中', returning: '回传中', completed: '已完成', cancelled: '已取消', failed: '未完成'})[message.status] || '处理中';
   card.title.textContent = message.title || '后台任务';
 }
-async function stop({keepError = false} = {}) {
-  epoch++; microphone?.close(); microphone = null; session?.close(); session = null;
+function conversationOf(value) {
+  return [...messages.entries()].filter(([key]) => key.split(':')[1] === String(value)).map(([, record]) => ({who: record.who, text: record.text}));
+}
+async function stop({keepError = false, recap: recapMode = keepError ? 'manual' : 'auto'} = {}) {
+  epoch++; const activeRecorder = recorder; recorder = null;
+  const recorded = activeRecorder ? await activeRecorder.finish().catch(() => []) : [];
+  microphone?.close(); microphone = null; session?.close(); session = null;
   clearInterval(ticker); clearInterval(elapsedTimer); const old = socket; socket = null;
   if (old && old.readyState < WebSocket.CLOSING) old.close();
   if (audio && audio.state !== 'closed') await audio.close().catch(() => {});
   audio = null; muted = false; $('mute').textContent = '暂停收音'; $('mic-level').value = 0; setControls(false);
   if (!keepError) status('offline', '本次会议已结束', '可以导出文字，或再开始一场新的讨论。');
+  if (activeRecorder && recapMode !== 'none') {
+    const nickname = $('nickname').value.trim() || '小莫';
+    recap.ready(recorded, {startedAt: meetingStartedAt, nickname, keyterms: [...new Set([nickname, '小莫', 'MOSS'])], conversation: conversationOf(meetingEpoch)}, {auto: recapMode === 'auto'});
+  }
 }
 function fail(text) {preservedError = true; notice(text); status('error', '连接需要检查', '修复后可以重新开始，现有字幕仍保留在页面中。'); void stop({keepError: true});}
 async function start() {
@@ -132,6 +146,9 @@ async function start() {
         if (message.action === 'session.updated') {
           if (data.error) throw Error('MOSS 未接受会议配置，请检查实时模型权限。');
           if (!micStarted) {micStarted = true; await microphone.start(); if (current !== epoch) return; send({action: 'mic_state', enabled: true});
+            recap.reset(); meetingEpoch = current; meetingStartedAt = Date.now();
+            if (MeetingRecorder.supported()) {recorder = new MeetingRecorder(microphone.stream); recorder.start();}
+            else notice('当前浏览器不支持录音，会后无法生成分人转写和纪要。');
             startedAt = Date.now(); elapsedTimer = setInterval(() => {const seconds = Math.floor((Date.now() - startedAt) / 1000); $('duration').textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;}, 1000);
             status('listening', '小莫已入席', '可以开始讨论。需要帮忙时，叫一声“小莫”。');}
         }
@@ -157,13 +174,13 @@ async function start() {
 }
 $('start').onclick = start;
 $('stop').onclick = async () => {await stop(); await api('/api/stop', {}).catch(() => {});};
-$('mute').onclick = () => {if (!microphone) return; muted = !muted; microphone.setMuted(muted); socket?.send(JSON.stringify({action: 'mic_state', enabled: !muted})); $('mute').textContent = muted ? '继续收音' : '暂停收音';};
+$('mute').onclick = () => {if (!microphone) return; muted = !muted; microphone.setMuted(muted); microphone.stream.getAudioTracks().forEach(track => {track.enabled = !muted;}); socket?.send(JSON.stringify({action: 'mic_state', enabled: !muted})); $('mute').textContent = muted ? '继续收音' : '暂停收音';};
 $('export').onclick = () => {
   if (!messages.size) return notice('还没有可以导出的对话文字。');
   const text = '# MOSS 会议对话\n\n' + [...messages.values()].map(record => `**${record.name} · ${record.time}**\n\n${record.text}`).join('\n\n');
   const url = URL.createObjectURL(new Blob([text], {type: 'text/markdown;charset=utf-8'})); const link = document.createElement('a'); link.href = url; link.download = `MOSS会议-${new Date().toISOString().slice(0, 10)}.md`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
-$('shutdown').onclick = async () => {await stop(); await api('/api/shutdown', {}); $('meeting-title').textContent = '服务已退出'; $('meeting-subtitle').textContent = '下次双击“启动会议.vbs”即可重新打开。'; $('start').disabled = true;};
+$('shutdown').onclick = async () => {await stop({recap: 'none'}); await api('/api/shutdown', {}); $('meeting-title').textContent = '服务已退出'; $('meeting-subtitle').textContent = '下次双击“启动会议.vbs”即可重新打开。'; $('start').disabled = true;};
 window.addEventListener('pagehide', () => {microphone?.close(); session?.close(); socket?.close();});
 refreshStatus().catch(error => notice(error.message)); devices().catch(() => {});
 setInterval(() => {if (!document.hidden && !socket) refreshStatus().catch(() => {});}, 3000);

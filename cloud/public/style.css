@@ -2,3 +2,12 @@
 .service-nav{display:flex;align-items:center;gap:8px;margin:0 0 27px;padding:5px;background:#e9eee3;border-radius:12px;width:100%}.service-nav a{padding:9px 16px;border-radius:9px;color:#718166;text-decoration:none;font-size:12px;white-space:nowrap}.service-nav a[aria-current="page"]{background:#fff;color:#335841;box-shadow:0 2px 5px #2c4b3020}.service-nav>span{margin-left:auto;padding-right:12px;color:#91a185;font-size:10px}@media(max-width:750px){.service-nav>span{display:none}}@media(max-width:420px){.service-nav a{font-size:11px;padding:9px 10px}}
 
 .cloud-info{display:flex;gap:15px;align-items:center;justify-content:space-between;background:#eaf1dd;border-bottom:1px solid #dce6cf;padding:10px 5%;font-size:11px;color:#6e805d}.cloud-info a{white-space:nowrap;color:#416647;text-underline-offset:3px}@media(max-width:650px){.cloud-info{align-items:flex-start;flex-direction:column;gap:3px}.header-right .local-tag{font-size:9px}}
+.recap-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0 4px}.recap-summary{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.75;color:#334b42;background:#fafbf7;border:1px solid #edf0e7;border-radius:12px;padding:14px 16px;margin:12px 0;max-height:460px;overflow:auto}.recap-subtitle{margin:14px 0 8px}.recap-transcript{max-height:360px;overflow:auto;border-top:1px solid #f0f3eb}.recap-line{display:grid;grid-template-columns:52px 96px 1fr;gap:10px;padding:8px 0;border-bottom:1px solid #f4f6f0;font-size:13px;color:#4e6047}.recap-line time{color:#9ba691;font-size:11px;font-variant-numeric:tabular-nums;padding-top:2px}.recap-speaker{font-weight:600;color:#5f7d40;overflow-wrap:anywhere}@media(max-width:650px){.recap-line{grid-template-columns:44px 1fr}.recap-line span:last-child{grid-column:1/-1}}
+
+/* 讯飞密钥 */
+.xf-box{display:grid;gap:6px;margin:10px 0 14px;padding:12px;border:1px solid #e1e7dd;background:#fbfcf9;border-radius:12px}
+.xf-head{display:flex;justify-content:space-between;align-items:center;font-weight:600}
+.xf-box[hidden]{display:none}
+
+
+.remember-label{display:flex!important;align-items:center;gap:8px;font-size:13px}.remember-label input{width:16px;min-height:16px;margin:0;flex:none;accent-color:#347b69}.remember-actions{display:flex;flex-wrap:wrap;gap:8px}.remember-actions button{flex:1 1 120px}
