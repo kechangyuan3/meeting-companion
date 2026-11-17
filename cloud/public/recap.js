@@ -109,8 +109,9 @@ export function createRecap({request, $}) {
       parts = recorded; meta = {...info, endedAt: new Date()}; segments = []; summary = ''; finishedAt = null; transcribed = false;
       card.hidden = false; renderSegments(); $('recap-summary').hidden = true;
       if (!parts.length) return state('error', '这场会议没有录到可用的音频。');
-      const minutes = Math.max(1, Math.round((Date.now() - info.startedAt) / 60000));
-      state('idle', `已录音约 ${minutes} 分钟。生成分人转写按音频时长计费（约 24 积分/小时），纪要由 Nex N2.6 生成。`);
+      const seconds = Math.max(0, Math.floor((Date.now() - info.startedAt) / 1000));
+      const duration = seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
+      state('idle', `已录音 ${duration}。生成分人转写按音频时长计费，以 MOSS 控制台当前价格为准；纪要由 Nex N2.6 生成。`);
       if (auto) void run();
     },
   };

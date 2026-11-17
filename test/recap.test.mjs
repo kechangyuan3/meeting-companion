@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {createCloudApp} from '../worker/index.js';
 import {startMeeting} from '../server.mjs';
 import {recapSummaryRequest, recapSummaryText, recapTask, RecapError} from '../runtime/moss-recap.mjs';
+import {createRecap} from '../cloud/public/recap.js';
 
 const origin = 'https://meeting.example';
 const encoder = new TextEncoder();
@@ -14,6 +15,16 @@ const sse = (events, done = true) => new ReadableStream({start(controller) {
 }});
 const chunk = (content, reasoning) => ({object: 'chat.completion.chunk', choices: [{index: 0, delta: {...(content ? {content} : {}), ...(reasoning ? {reasoning_content: reasoning} : {})}}]});
 const reply = (value, status = 200) => new Response(JSON.stringify(value), {status, headers: {'Content-Type': 'application/json'}});
+
+test('short recordings show seconds instead of rounding every session up to one minute', t => {
+  const now=1800000000000;t.mock.method(Date,'now',()=>now);
+  const nodes=new Map(),$=id=>{if(!nodes.has(id))nodes.set(id,{replaceChildren(){}});return nodes.get(id);};
+  let requests=0;const recap=createRecap({$,request:()=>{requests++;}});
+  recap.ready([new Blob(['fixture'])],{startedAt:now-25000},{auto:false});
+  assert.match($('recap-note').textContent,/已录音 25 秒/);assert.doesNotMatch($('recap-note').textContent,/1 分钟/);
+  recap.ready([new Blob(['fixture'])],{startedAt:now-125000},{auto:false});
+  assert.match($('recap-note').textContent,/已录音 2 分 5 秒/);assert.equal(requests,0);
+});
 
 // 模拟 MOSS 开放平台的三个接口。
 function fakeMoss(seen) {
