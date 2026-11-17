@@ -11,6 +11,7 @@ const $ = id => document.getElementById(id);
 let configured = false, socket, microphone, session, audio, ticker, elapsedTimer, startedAt, epoch = 0, muted = false;
 let preservedError = false, backendPolling = null;
 let recorder = null, meetingEpoch = 0, meetingStartedAt = 0, xfLink = null;
+let mossTransportReady = false;
 // 会中对话用 MOSS-Live 还是讯飞星火超拟人交互；录音和会后整理两种都一样。
 const engine = () => $('engine').value;
 const ready = () => engine() === 'xf' ? xfConfigured() : configured;
@@ -163,7 +164,7 @@ function conversationOf(value) {
   return [...messages.entries()].filter(([key]) => key.split(':')[1] === String(value)).map(([, record]) => ({who: record.who, text: record.text}));
 }
 async function stop({keepError = false, recap: recapMode = keepError ? 'manual' : 'auto'} = {}) {
-  epoch++; const activeRecorder = recorder; recorder = null;
+  epoch++; mossTransportReady = false; const activeRecorder = recorder; recorder = null;
   const recorded = activeRecorder ? await activeRecorder.finish().catch(() => []) : [];
   microphone?.close(); microphone = null; session?.close(); session = null; xfLink?.close(); xfLink = null;
   clearInterval(ticker); clearInterval(elapsedTimer); const old = socket; socket = null;
@@ -188,7 +189,7 @@ async function start() {
       onFrame: frame => {
         if (current !== epoch) return;
         if (xfLink) {xfLink.sendAudio(frame); return;}
-        if (socket?.readyState !== WebSocket.OPEN) return;
+        if (!mossTransportReady || socket?.readyState !== WebSocket.OPEN) return;
         if (socket.bufferedAmount > 512000) return fail('上传速度跟不上麦克风音频，请检查网络后重新开始。');
         // Plain PCM is sent; MOSS defaults to the public PCM protocol.
         socket.send(frame);
@@ -199,10 +200,14 @@ async function start() {
     status('connecting', '正在连接 MOSS', '麦克风已准备好，等待实时会话。');
     const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/connect`); socket = ws; ws.onopen = () => authenticateMoss(ws); ws.binaryType = 'arraybuffer';
     const send = message => {if (current === epoch && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));};
-    session = new PublicSession(send);
-    session.speaker = new Speaker({ctx: audio, ledger: session.ledger, onMessages: values => session.messages(values)});
+    const resetSession = () => {
+      session?.close(); try {session?.speaker?.gainNode?.disconnect();} catch {}
+      session = new PublicSession(send);
+      session.speaker = new Speaker({ctx: audio, ledger: session.ledger, onMessages: values => session.messages(values)});
+    };
+    resetSession(); mossTransportReady = false;
     ticker = setInterval(() => {if (session && audio) session.speaker.tick(audio.currentTime);}, 20);
-    let micStarted = false, inputSerial = 0, pendingInput = null;
+    let micStarted = false, micStarting = null, inputSerial = 0, pendingInput = null, wireGeneration = 0, recovering = false;
     ws.onmessage = async event => {
       if (current !== epoch) return;
       try {
@@ -210,7 +215,16 @@ async function start() {
         const message = JSON.parse(event.data); const data = message.data || {};
         if (message.type === 'local.error') return fail(message.message);
         if (message.type === 'local.task') return task(message);
+        if (message.type === 'local.reconnecting') {
+          mossTransportReady = false;
+          if (!recovering) {wireGeneration++; pendingInput = null; resetSession();}
+          recovering = true;
+          notice(`MOSS 语音正在恢复（第 ${message.attempt} 次）。录音和已有字幕继续保留，请稍候再说。`);
+          status('connecting', '正在恢复语音连接', '会议尚未结束，正在恢复原来的 MOSS 会话。');
+          return;
+        }
         session.text(message);
+        if (message.action === 'session.closing') notice(`MOSS 连接通知${data.code != null ? `（${data.code}）` : ''}：${data.reason || '服务端即将关闭连接'}。${data.reconnect ? '正在准备恢复原会话。' : '录音和已有字幕会保留。'}`);
         if (message.action === 'session_attached') {
           const nickname = $('nickname').value.trim() || '小莫';
           const behaviour = $('mode').value === 'listen' ? '平时安静旁听，不主动插话；被叫到时再总结或回答。' : '自然参与会议。参会者之间的讨论保持旁听；听到你的名字、明确向你提问、或等待你的查询结论时，简洁回应。';
@@ -222,27 +236,35 @@ async function start() {
         }
         if (message.action === 'session.updated') {
           if (data.error) throw Error('MOSS 未接受会议配置，请检查实时模型权限。');
-          if (!micStarted) {micStarted = true; await microphone.start(); if (current !== epoch) return; send({action: 'mic_state', enabled: true});
+          const configurationGeneration = wireGeneration;
+          if (!micStarting) micStarting = microphone.start();
+          await micStarting;
+          if (current !== epoch || configurationGeneration !== wireGeneration) return;
+          if (!micStarted) {micStarted = true;
             recap.reset(); meetingEpoch = current; meetingStartedAt = Date.now();
             if (MeetingRecorder.supported()) {recorder = new MeetingRecorder(microphone.stream); recorder.start();}
             else notice('当前浏览器不支持录音，会后无法生成分人转写和纪要。');
             startedAt = Date.now(); elapsedTimer = setInterval(() => {const seconds = Math.floor((Date.now() - startedAt) / 1000); $('duration').textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;}, 1000);
-            status('listening', '小莫已入席', '可以开始讨论。需要帮忙时，叫一声“小莫”。');}
+          }
+          mossTransportReady = true; send({action: 'mic_state', enabled: !muted});
+          if (recovering) notice('MOSS 语音已恢复；录音、字幕和会议计时继续保留。');
+          status('listening', recovering ? '语音连接已恢复' : '小莫已入席', '可以开始讨论。需要帮忙时，叫一声“小莫”。');
+          recovering = false;
         }
         if (message.action.startsWith('input.transcript.')) {
-          if (!pendingInput) pendingInput = `user:${current}:${++inputSerial}`;
-          const key = data.turn ? `user:${current}:${data.turn}` : pendingInput;
+          if (!pendingInput) pendingInput = `user:${current}:${wireGeneration}:pending${++inputSerial}`;
+          const key = data.turn ? `user:${current}:${wireGeneration}:${data.turn}` : pendingInput;
           addMessage(key, 'user', data.text, message.action !== 'input.transcript.updated');
           if (message.action === 'input.transcript.done') pendingInput = null;
         }
-        if (message.action.startsWith('output.transcript.')) addMessage(`ai:${current}:${data.run_id || 'current'}`, 'ai', data.text, message.action === 'output.transcript.done');
+        if (message.action.startsWith('output.transcript.')) addMessage(`ai:${current}:${wireGeneration}:${data.run_id || 'current'}`, 'ai', data.text, message.action === 'output.transcript.done');
         if (message.action === 'response.audio.started') status('speaking', '小莫正在回应', '你可以随时开口补充或打断。');
         if (['response.interrupted', 'response.ended'].includes(message.action) && micStarted) status('listening', '小莫在听', '讨论可以继续，需要帮忙时叫“小莫”。');
         if (message.action === 'error') notice(`MOSS 请求提示：${data.error?.code || '请检查账户和网络'}。`);
       } catch (error) {fail(error.message);}
     };
     ws.onerror = () => {if (current === epoch && !preservedError) fail('连接未成功。请先验证 MOSS Key，并检查网络连接。');};
-    ws.onclose = () => {if (current === epoch && !preservedError) {notice('实时连接已关闭。可重新开始会议。'); void stop();}};
+    ws.onclose = () => {if (current === epoch && !preservedError) fail('网站实时连接已断开。录音和字幕已保留，可下载后重新开始。');};
   } catch (error) {
     localMic?.close(); if (current !== epoch) return;
     const message = error.name === 'NotAllowedError' ? '麦克风尚未授权。请点击浏览器地址栏的权限图标，允许本页使用麦克风后重新开始。' : error.name === 'NotFoundError' ? '没有找到麦克风，请连接设备后重试。' : error.name === 'NotReadableError' ? '麦克风无法使用，可能正被其他程序独占。请关闭独占录音后重试。' : error.message;

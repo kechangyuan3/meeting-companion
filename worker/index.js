@@ -28,7 +28,7 @@ function nativeKey(data){
   return {platform,id,tail:`${platform}/${encodeURIComponent(id)}`};
 }
 
-export function createCloudApp({fetchImpl=fetch,assets={},siteOrigin,pairFactory=()=>new WebSocketPair(),upgradeResponse=client=>new Response(null,{status:101,webSocket:client})}={}){
+export function createCloudApp({fetchImpl=fetch,assets={},siteOrigin,pairFactory=()=>new WebSocketPair(),upgradeResponse=client=>new Response(null,{status:101,webSocket:client}),liveTimers={setTimeout,clearTimeout,setInterval,clearInterval}}={}){
   async function upstream(base,path,key,{method='GET',data}={}){
     let response;
     try{response=await fetchImpl(`${base}${path}`,{method,headers:{...(base===MOSS?{Authorization:`Bearer ${key}`}:{'X-API-Key':key}),...(data?{'Content-Type':'application/json'}:{})},...(data?{body:JSON.stringify(data)}:{}),signal:AbortSignal.timeout(25000),redirect:'manual'});}
@@ -45,35 +45,89 @@ export function createCloudApp({fetchImpl=fetch,assets={},siteOrigin,pairFactory
   function connect(request){
     if(request.headers.get('Upgrade')?.toLowerCase()!=='websocket')return json({error:'需要 WebSocket 连接。'},426);
     const [client,server]=Object.values(pairFactory());server.accept();server.binaryType='arraybuffer';
-    let remote=null,state='waiting',attached=false;
+    let remote=null,state='waiting',attached=false,apiKey='',sessionId='',closing=null;
+    let deadline=null,heartbeat=null,retryTimer=null,openingController=null,retries=0;
+    const reconnectTimes=[];
     const send=value=>{try{if(server.readyState===1)server.send(JSON.stringify(value));}catch{}};
-    const finish=(message='',code=1000)=>{if(state==='closed')return;state='closed';clearTimeout(timer);if(message)send({type:'local.error',message});try{remote?.close(code,'会话结束');}catch{}try{server.close(code,'会话结束');}catch{}};
-    const timer=setTimeout(()=>finish('实时会话建立超时，请重新开始。',1008),30000);
+    const safeReason=value=>String(value??'').replaceAll(apiKey||'\u0000','[已隐藏密钥]').replace(/sk-[A-Za-z0-9_-]{12,}/gi,'[已隐藏密钥]').replace(/[\u0000-\u001f]/g,' ').slice(0,180);
+    const stopHeartbeat=()=>{if(heartbeat!==null)liveTimers.clearInterval(heartbeat);heartbeat=null;};
+    const finish=(message='',code=1000)=>{
+      if(state==='closed')return;state='closed';attached=false;
+      liveTimers.clearTimeout(deadline);liveTimers.clearTimeout(retryTimer);stopHeartbeat();openingController?.abort();
+      if(message)send({type:'local.error',message});
+      try{remote?.close(1000,'会话结束');}catch{}remote=null;apiKey='';
+      try{server.close(code,'会话结束');}catch{}
+    };
+    const armDeadline=()=>{liveTimers.clearTimeout(deadline);deadline=liveTimers.setTimeout(()=>finish('实时会话建立超时；录音和字幕仍保留，请重新开始。',1008),30000);};
+    function recover(){
+      if(state==='closed'||retryTimer!==null)return;
+      const now=Date.now();while(reconnectTimes.length&&now-reconnectTimes[0]>120000)reconnectTimes.shift();
+      if(!sessionId||++retries>3||reconnectTimes.length>=5)return finish('MOSS 连接连续恢复失败；录音和字幕已保留，请检查网络或账户状态后重新开始。',1011);
+      reconnectTimes.push(now);state='reconnecting';attached=false;stopHeartbeat();liveTimers.clearTimeout(deadline);
+      send({type:'local.reconnecting',attempt:retries,message:'正在恢复 MOSS 语音连接，会议录音继续保留。'});
+      retryTimer=liveTimers.setTimeout(()=>{retryTimer=null;if(state!=='closed')void openRemote(true);},[500,1500,3500][retries-1]);
+    }
+    async function openRemote(resume){
+      if(state==='closed')return;
+      state=resume?'reconnecting':'connecting';closing=null;
+      // The deadline belongs only to the upgrade request, never to the accepted socket.
+      const controller=new AbortController();openingController=controller;
+      const handshake=liveTimers.setTimeout(()=>controller.abort(),25000);
+      let response;
+      try{response=await fetchImpl(`${MOSS}/v1/realtime?model=moss-live-1.0`,{headers:{Upgrade:'websocket',Authorization:`Bearer ${apiKey}`},redirect:'manual',signal:controller.signal});}
+      catch{if(state!=='closed'){if(resume)recover();else finish('无法建立 MOSS 实时会话，请检查网络、Key、额度和服务状态。',1011);}return;}
+      finally{liveTimers.clearTimeout(handshake);if(openingController===controller)openingController=null;}
+      if(response.status!==101||!response.webSocket){
+        if(resume&&![401,402,403,404,409,429].includes(response.status)){recover();return;}
+        return finish(`MOSS 拒绝连接（HTTP ${response.status}），请检查 Key、模型权限和额度。`,1008);
+      }
+      const next=response.webSocket;
+      if(state==='closed'){try{next.accept();next.close(1000,'页面连接已结束');}catch{}return;}
+      remote=next;next.binaryType='arraybuffer';armDeadline();
+      next.addEventListener('message',incoming=>{
+        if(state==='closed'||remote!==next)return;
+        try{
+          if(typeof incoming.data!=='string'){if(attached&&server.readyState===1)server.send(incoming.data);return;}
+          const raw=JSON.parse(incoming.data);
+          if(raw.action==='session.closing'){
+            const d=raw.data||{};closing={code:typeof d.code==='number'?d.code:safeReason(d.code),reason:safeReason(d.reason),reconnect:d.reconnect===true};
+            raw.data=closing;
+          }
+          if(raw.action==='session_attached'){
+            const id=raw.data?.session_id;if(typeof id!=='string'||!id||id.length>512)throw Error('invalid session');
+            sessionId=id;attached=true;state='ready';retries=0;liveTimers.clearTimeout(deadline);stopHeartbeat();
+            heartbeat=liveTimers.setInterval(()=>{if(state==='ready'&&remote===next&&next.readyState===1){try{next.send(JSON.stringify({action:'ping',timestamp:Date.now()}));}catch{finish('MOSS 连接保活失败；录音和字幕已保留，请重新开始。',1011);}}},15000);
+          }
+          if(resume&&raw.action==='error'&&/session|memory_scope/i.test(raw.data?.error?.code||''))return finish('MOSS 未能恢复原会话；录音和字幕已保留，请重新开始。',1008);
+          const filtered=filterEvent(raw);if(filtered)send(filtered);
+        }catch{finish('实时语音协议处理失败；录音和字幕已保留，请重新开始。',1011);}
+      });
+      next.addEventListener('close',event=>{
+        if(state==='closed'||remote!==next)return;
+        remote=null;attached=false;stopHeartbeat();liveTimers.clearTimeout(deadline);
+        const code=closing?.code??event.code??1006,reason=closing?.reason||safeReason(event.reason);
+        if(sessionId&&(closing?closing.reconnect:![1008,4001,4003,4029].includes(Number(code)))){recover();return;}
+        finish(`MOSS 实时连接已关闭（${code}）${reason?'：'+reason:'。'} 录音和字幕已保留。`,1000);
+      });
+      next.addEventListener('error',()=>{
+        if(state==='closed'||remote!==next)return;
+        // Let the close event complete the old transport before attempting a resume.
+        try{next.close(1011,'transport error');}catch{finish('MOSS 实时连接出现错误；录音和字幕已保留，请重新开始。',1011);}
+      });
+      next.accept();
+      next.send(JSON.stringify({action:'attach_session',...(resume?{session_id:sessionId}:{}),memory_scope:'session',delegation:{type:'none'}}));
+    }
+    armDeadline();
     server.addEventListener('message',async event=>{
       if(state==='closed')return;
       try{
         if(state==='waiting'){
           if(typeof event.data!=='string'||event.data.length>8192)throw new VexaError('请先验证密钥再开始。');
           const auth=JSON.parse(event.data);if(auth.action!=='local.authenticate')throw new VexaError('缺少会话认证。');
-          const key=credential(auth.apiKey);state='connecting';
-          const response=await fetchImpl(`${MOSS}/v1/realtime?model=moss-live-1.0`,{headers:{Upgrade:'websocket',Authorization:`Bearer ${key}`},redirect:'manual',signal:AbortSignal.timeout(25000)});
-          if(response.status!==101||!response.webSocket)throw new VexaError(`MOSS 拒绝连接（HTTP ${response.status}），请检查 Key、模型权限和额度。`);
-          remote=response.webSocket;remote.binaryType='arraybuffer';
-          if(state==='closed'){try{remote.close(1000,'页面连接已结束');}catch{}return;}
-          remote.addEventListener('message',incoming=>{
-            if(state==='closed')return;
-            try{
-              if(typeof incoming.data!=='string'){if(server.readyState===1)server.send(incoming.data);return;}
-              const raw=JSON.parse(incoming.data);
-              if(raw.action==='session_attached'){attached=true;clearTimeout(timer);}
-              const filtered=filterEvent(raw);if(filtered)send(filtered);
-            }catch{finish('实时语音协议处理失败，请重新开始。',1011);}
-          });
-          remote.addEventListener('close',()=>finish('MOSS 实时连接已结束。'));
-          remote.addEventListener('error',()=>finish('MOSS 实时连接出现错误，请重试。',1011));
-          remote.accept();state='ready';remote.send(JSON.stringify({action:'attach_session',memory_scope:'session',delegation:{type:'none'}}));
+          apiKey=credential(auth.apiKey);await openRemote(false);
           return;
         }
+        if(state==='reconnecting')return; // Microphone recording continues; do not replay a backlog at accelerated speed.
         if(state!=='ready'||!attached||remote?.readyState!==1)throw new VexaError('会话尚未就绪。');
         if(typeof event.data!=='string'){
           if(event.data.byteLength>4*1024*1024)throw new VexaError('音频片段过大。');

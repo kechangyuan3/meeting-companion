@@ -18,6 +18,7 @@
     "session.instructions.append": "event_id delegation_id content status"
   },
   "outputs": {
+    "session.closing": "code reason reconnect",
     "response.audio.started": "run_id turn_id",
     "response.audio.context": "chunk_id run_id turn_id source request_id",
     "response.audio.done": "run_id turn_id",

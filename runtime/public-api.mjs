@@ -8,6 +8,8 @@ const select=(v,names)=>{
   else if(['context','output'].includes(k)){if(Array.isArray(x))out[k]=x;}
   else if(k==='tools')out[k]=Array.isArray(x)?x.filter(y=>typeof y==='string'):[];
   else if(['offset_ms','timeout_ms','output_index','client_timestamp','server_recv_timestamp'].includes(k)){if(Number.isFinite(x))out[k]=x;}
+  else if(k==='code'&&(typeof x==='string'||Number.isFinite(x)))out[k]=x;
+  else if(k==='reconnect'&&typeof x==='boolean')out[k]=x;
   else if(typeof x==='string'||x===null)out[k]=x;
  }return out;
 };
