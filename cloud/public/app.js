@@ -6,6 +6,7 @@ import {Speaker} from './media/speaker.js';
 import {PublicSession} from './media/public-session.js';
 import {MeetingRecorder} from './media/recorder.js';
 import {createRecap} from './recap.js';
+import {createNexAssistant} from './nex-assistant.js';
 
 const $ = id => document.getElementById(id);
 let configured = false, socket, microphone, session, audio, ticker, elapsedTimer, startedAt, epoch = 0, muted = false;
@@ -70,6 +71,7 @@ async function restoreXfHere() {
 }
 // 会后整理（MOSS-Transcribe-Diarize-Pro 分人转写 + Nex N2.6 纪要），请求附上当前页面的 Key。
 const recap = createRecap({request: mossRequest, $});
+const nexAssistant = createNexAssistant({request: mossRequest, configured: mossConfigured, conversation: () => conversationOf(meetingEpoch), $});
 function feedback(id, text, type = '') {$(id).textContent = text; $(id).className = `feedback ${type}`;}
 function notice(text) {$('notice').textContent = text; $('notice').hidden = !text;}
 function status(kind, title, subtitle) {
@@ -79,6 +81,7 @@ function status(kind, title, subtitle) {
 }
 async function refreshStatus() {
   const data = await api('/api/status'); configured = data.configured;
+  nexAssistant.refresh();
   $('key-badge').textContent = data.verified ? '已验证' : configured ? '已配置' : '待填写';
   $('key-badge').className = `badge ${configured ? 'ready' : ''}`;
   updateStart();
@@ -91,7 +94,8 @@ async function refreshStatus() {
 }
 function showEngine() {
   const xf = engine() === 'xf'; $('xf-box').hidden = !xf;
-  $('moss-label').textContent = xf ? 'MOSS API Key（可选：会后分人转写和纪要用）' : 'MOSS API Key';
+  $('moss-label').textContent = xf ? 'MOSS API Key（Nex 问答、分人转写和纪要用）' : 'MOSS API Key';
+  $('live-model-name').textContent = xf ? '讯飞星火 · 超拟人交互（服务内置模型）' : 'MOSS-Live 1.0';
   updateStart();
 }
 $('engine').onchange = showEngine;
@@ -304,7 +308,9 @@ $('export').onclick = () => {
   const url = URL.createObjectURL(new Blob([text], {type: 'text/markdown;charset=utf-8'})); const link = document.createElement('a'); link.href = url; link.download = `MOSS会议-${new Date().toISOString().slice(0, 10)}.md`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 $('shutdown').onclick = async () => {
+  nexAssistant.cancel();
   await stop({recap: 'none'}); await api('/api/shutdown', {}); xfForget();
+  nexAssistant.refresh();
   try {await clearSavedXf();} catch (error) {notice(error.message);}
   for (const id of ['xf-appid', 'xf-apikey', 'xf-apisecret', 'api-key']) $(id).value = '';
   $('xf-badge').textContent = '待填写'; $('xf-badge').className = 'badge';

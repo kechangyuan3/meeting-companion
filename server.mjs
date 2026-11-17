@@ -30,7 +30,7 @@ async function sendResponse(res, response) {
   catch {res.destroy(); return;}
   res.end();
 }
-const recapPaths = new Set(['/api/moss/transcribe', '/api/moss/task', '/api/moss/summary']);
+const recapPaths = new Set(['/api/moss/transcribe', '/api/moss/task', '/api/moss/summary', '/api/moss/ask']);
 
 export async function startMeeting({port = 17860, apiKey = process.env.MOSS_API_KEY || '', codexPath, proxyUrl, run: suppliedRun,
   upstreamUrl = 'wss://api.mosi.cn/v1/realtime?model=moss-live-1.0', verifyKey, vexaBaseUrl, vexaFetch, mossFetch = fetch} = {}) {

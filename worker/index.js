@@ -209,9 +209,9 @@ export function createCloudApp({fetchImpl=fetch,assets={},siteOrigin,pairFactory
         catch(error){return json({error:error instanceof XfError?error.message:'验证未能完成，请稍后重试。'},error.status||502);}
       }
       if(request.method!=='POST')return json({error:'请通过页面操作。'},405);
-      if(path==='/api/moss/transcribe'||path==='/api/moss/task'||path==='/api/moss/summary'){
+      if(path==='/api/moss/transcribe'||path==='/api/moss/task'||path==='/api/moss/summary'||path==='/api/moss/ask'){
         let key='';try{key=credential(request.headers.get('Authorization')?.match(/^Bearer (.+)$/i)?.[1]);}catch{}
-        return recapRoute(path,{key,fetchImpl,contentType:request.headers.get('Content-Type'),keyterms:request.headers.get('X-Keyterms'),readBytes:limit=>readBytes(request,limit,RecapError),readJson:limit=>readBody(request,limit,RecapError)});
+        return recapRoute(path,{key,fetchImpl,signal:request.signal,contentType:request.headers.get('Content-Type'),keyterms:request.headers.get('X-Keyterms'),readBytes:limit=>readBytes(request,limit,RecapError),readJson:limit=>readBody(request,limit,RecapError)});
       }
       try{
         const data=await readBody(request);
