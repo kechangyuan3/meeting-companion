@@ -44,19 +44,22 @@ export async function vexaApi(path,data){
   throw Error('在线版可导出转写；使用本机版本可调用 Codex 整理纪要。');
 }
 // 讯飞星火「超拟人交互」：APPID、APIKey、APISecret 只保留在当前页面内存，开始会议时随实时连接发给本站签名。
-let xfKey=null;
+let xfKey=null,xfVerified=false;
 export async function xfConfigure(values){
+  xfVerified=false;
   const data={appId:String(values.appId||'').trim(),apiKey:String(values.apiKey||'').trim(),apiSecret:String(values.apiSecret||'').trim()};
   if(!data.appId||!data.apiKey||!data.apiSecret)throw Error('请把 APPID、APIKey、APISecret 三项都填上。');
   let response;try{response=await fetch('/api/xf/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),signal:AbortSignal.timeout(30000)});}catch{throw Error('连接超时或网络不可达，请稍后重试。');}
   let value;try{value=await response.json();}catch{throw Error('在线服务暂未响应，请稍后重试。');}
   if(!response.ok)throw Error(value.error||`验证失败（HTTP ${response.status}）。`);
-  xfKey=data;return {ok:true};
+  if(value.serviceVerified!==true)throw Error('讯飞尚未通过业务授权检测，请刷新页面后重新验证。');
+  xfKey=data;xfVerified=true;return {ok:true};
 }
-export const xfConfigured=()=>!!xfKey;
+export const xfConfigured=()=>!!xfKey&&xfVerified;
+export const xfMarkUnverified=()=>{xfVerified=false;};
 export const currentXfCredentials=()=>xfKey ? {...xfKey} : null;
 export const mossConfigured=()=>!!mossKey;
 export function authenticateXf(socket,options){socket.send(JSON.stringify({action:'local.authenticate',...xfKey,...options}));}
-export function xfForget(){xfKey=null;}
-window.addEventListener('pagehide',()=>{mossKey='';vexaKey='';xfKey=null;});
+export function xfForget(){xfKey=null;xfVerified=false;}
+window.addEventListener('pagehide',()=>{mossKey='';vexaKey='';xfKey=null;xfVerified=false;});
 

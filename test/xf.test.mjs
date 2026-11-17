@@ -57,14 +57,15 @@ class Socket extends EventTarget {
 }
 
 test('在线版 /connect-xf：各自签名、PCM 包成讯飞帧、回复转成字幕和音频，密钥不回传页面', async () => {
-  const pairs = [], remotes = [], urls = [];
+  const pairs = [], remotes = [], urls = [], ready = Promise.withResolvers(); let accepted = 0;
+  class ReadySocket extends Socket {accept() {super.accept(); if (++accepted === 2) ready.resolve();}}
   const app = createCloudApp({pairFactory: () => {const pair = {0: new Socket(), 1: new Socket()}; pairs.push(pair); return pair;}, upgradeResponse: client => ({status: 101, webSocket: client}),
-    fetchImpl: async (url, options) => {assert.equal(options.headers.Upgrade, 'websocket'); urls.push(url); const remote = new Socket(); remotes.push(remote); return {status: 101, webSocket: remote};}});
+    fetchImpl: async (url, options) => {assert.equal(options.headers.Upgrade, 'websocket'); urls.push(url); const remote = new ReadySocket(); remotes.push(remote); return {status: 101, webSocket: remote};}});
   const connect = () => app.fetch(new Request(origin + '/connect-xf', {headers: {Origin: origin, Upgrade: 'websocket'}}));
   await connect(); await connect();
   pairs[0][1].emit(JSON.stringify({action: 'local.authenticate', ...creds, voice: 'x5_lingxiaoyue_flow', prompt: '你叫小莫', uid: 'alice'}));
   pairs[1][1].emit(JSON.stringify({action: 'local.authenticate', ...creds, appId: 'bob12345', uid: 'bob'}));
-  await new Promise(resolve => setTimeout(resolve, 20));
+  await ready.promise;
   assert.equal(urls.length, 2); assert.ok(urls.every(url => url.startsWith('https://sparkos.xfyun.cn/v1/openapi/chat?authorization=')));
   assert.deepEqual(JSON.parse(pairs[0][1].sent[0]), {type: 'xf.ready'});
   pairs[0][1].emit(new Uint8Array([9, 9]).buffer); pairs[0][1].emit(new Uint8Array([8, 8]).buffer);
@@ -93,12 +94,35 @@ test('在线版 /connect-xf 拒绝外站、未认证的音频和格式不对的�
   assert.match(JSON.parse(pairs[1][1].sent.at(-1)).message, /APPID/); assert.equal(calls, 0);
 });
 
-test('在线版 /api/xf/verify：握手成功才算通过，失败时给出能操作的提示', async () => {
-  let status = 101; const app = createCloudApp({fetchImpl: async () => status === 101 ? {status, webSocket: new Socket()} : new Response(null, {status})});
+test('在线版 /api/xf/verify：发送业务测试音频，握手成功不再等于服务已授权', async () => {
+  class Confirmed extends Socket {send(value) {super.send(value);if(JSON.parse(value).header.status===0)this.emit(JSON.stringify({header:{code:0,status:0,message:'connect success'}}));}}
+  let status = 101; const app = createCloudApp({fetchImpl: async () => status === 101 ? {status, webSocket: new Confirmed()} : new Response(null, {status})});
   const verify = data => app.fetch(new Request(origin + '/api/xf/verify', {method: 'POST', headers: {Origin: origin, 'Content-Type': 'application/json'}, body: JSON.stringify(data)}));
-  assert.deepEqual(await (await verify(creds)).json(), {ok: true});
+  assert.deepEqual(await (await verify(creds)).json(), {ok: true,serviceVerified:true,probeMs:3000});
   status = 401; const rejected = await verify(creds); assert.equal(rejected.status, 502); assert.match((await rejected.json()).error, /APISecret/);
   assert.equal((await verify({appId: 'a1b2'})).status, 400);
+});
+
+test('讯飞握手后返回 11200 的业务授权错误，验证必须失败且密钥不回显',async()=>{
+ class Denied extends Socket {
+  send(value){
+   super.send(value);const frame=JSON.parse(value);
+   if(frame.header.status===0){
+    queueMicrotask(()=>this.emit(JSON.stringify({header:{code:0,message:'connect success'}})));
+    queueMicrotask(()=>{const bytes=new TextEncoder().encode(JSON.stringify({header:{code:11200,message:'appId没有授权或者tokens超过限制'}}));this.emit(bytes.buffer);});
+   }
+  }
+ }
+ const app=createCloudApp({fetchImpl:async()=>({status:101,webSocket:new Denied()})});
+ const response=await app.fetch(new Request(origin+'/api/xf/verify',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify(creds)}));
+ assert.equal(response.status,403);const text=await response.text();assert.match(text,/11200/);assert.match(text,/超拟人交互/);assert.doesNotMatch(text,new RegExp(creds.apiSecret));
+});
+
+test('讯飞握手后关闭的原因包含真实秒数，不再泛称达到 30 分钟',async()=>{
+ const accepted=Promise.withResolvers();class ReadySocket extends Socket{accept(){super.accept();accepted.resolve();}}
+ const pairs=[],remote=new ReadySocket();const app=createCloudApp({pairFactory:()=>{const pair={0:new Socket(),1:new Socket()};pairs.push(pair);return pair;},upgradeResponse:client=>({status:101,webSocket:client}),fetchImpl:async()=>({status:101,webSocket:remote})});
+ await app.fetch(new Request(origin+'/connect-xf',{headers:{Origin:origin,Upgrade:'websocket'}}));pairs[0][1].emit(JSON.stringify({action:'local.authenticate',...creds}));await accepted.promise;remote.close();
+ const message=JSON.parse(pairs[0][1].sent.at(-1)).message;assert.match(message,/秒后关闭/);assert.doesNotMatch(message,/最长 30 分钟/);
 });
 
 test('页面端 XfLink：29 分钟续连时先接好新连接再切换，旧连接收到结束通知', async () => {

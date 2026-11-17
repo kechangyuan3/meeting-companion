@@ -8,6 +8,7 @@
 .xf-box{display:grid;gap:6px;margin:10px 0 14px;padding:12px;border:1px solid #e1e7dd;background:#fbfcf9;border-radius:12px}
 .xf-head{display:flex;justify-content:space-between;align-items:center;font-weight:600}
 .xf-box[hidden]{display:none}
+.audio-tools-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.audio-tools-grid>div{min-width:0}.audio-tools input[type=file]{font-size:12px;padding:9px}.audio-tools textarea{width:100%;font:inherit;resize:vertical;border:1px solid #dce4d3;border-radius:10px;padding:12px;background:#fbfcf8;color:#334b42;line-height:1.6}.audio-tools audio{width:100%;margin:12px 0}.audio-tools audio[hidden],.audio-tools a[hidden]{display:none}.audio-tools .recap-actions{margin-bottom:12px}@media(max-width:650px){.audio-tools-grid{grid-template-columns:1fr}}
 
 
 .remember-label{display:flex!important;align-items:center;gap:8px;font-size:13px}.remember-label input{width:16px;min-height:16px;margin:0;flex:none;accent-color:#347b69}.remember-actions{display:flex;flex-wrap:wrap;gap:8px}.remember-actions button{flex:1 1 120px}

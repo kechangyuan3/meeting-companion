@@ -144,16 +144,36 @@ export function createCloudApp({fetchImpl=fetch,assets={},siteOrigin,pairFactory
   // 讯飞星火「超拟人交互」：页面先发 local.authenticate（APPID、APIKey、APISecret 和会话选项），之后只发 16 kHz PCM 二进制帧。
   // 服务端把 PCM 包成讯飞请求帧，把讯飞回复拆成字幕事件（JSON）和 24 kHz PCM 音频（二进制）转给页面。
   async function xfOpen(credentials){
+    const controller=new AbortController(),deadline=liveTimers.setTimeout(()=>controller.abort(),20000);
     let response;
-    try{response=await fetchImpl(await xfSignedUrl(credentials),{headers:{Upgrade:'websocket'},redirect:'manual',signal:AbortSignal.timeout(20000)});}
+    try{response=await fetchImpl(await xfSignedUrl(credentials),{headers:{Upgrade:'websocket'},redirect:'manual',signal:controller.signal});}
     catch{throw new XfError('无法连接讯飞，请检查网络后重试。',502);}
+    finally{liveTimers.clearTimeout(deadline);}
     if(response.status!==101||!response.webSocket)throw new XfError(response.status===401||response.status===403?'讯飞拒绝了签名：请核对 APIKey 和 APISecret，并确认电脑时间准确。':`讯飞拒绝连接（HTTP ${response.status}），请检查 APPID、APIKey、APISecret 和超拟人交互服务是否已开通。`,502);
     return response.webSocket;
+  }
+  async function xfVerifyService(credentials){
+    const remote=await xfOpen(credentials),options=xfOptions({uid:'verify-'+crypto.randomUUID(),prompt:'服务授权检测，请保持安静，不主动说话。'});
+    remote.binaryType='arraybuffer';
+    return new Promise((resolve,reject)=>{
+      let done=false,first=true,frames=0,ack=false,interval=null,settle=null;
+      const finish=error=>{
+        if(done)return;done=true;liveTimers.clearInterval(interval);liveTimers.clearTimeout(settle);
+        try{if(remote.readyState===1&&frames)remote.send(JSON.stringify(xfFrame(credentials,options,{status:2})));}catch{}
+        try{remote.close(1000,'服务验证结束');}catch{}
+        error?reject(error):resolve({ok:true,serviceVerified:true,probeMs:3000});
+      };
+      const send=()=>{if(done)return;try{remote.send(JSON.stringify(xfFrame(credentials,options,{status:first?0:1,audio:new Uint8Array(640)})));first=false;frames++;}catch{finish(new XfError('讯飞试连时音频发送失败，请重试。',502));}};
+      remote.addEventListener('message',event=>{if(done)return;try{const {event:value}=xfParse(event.data);if(value.code)finish(new XfError(xfErrorMessage(value.code,value.message),value.code===11200?403:502));else ack=true;}catch{finish(new XfError('讯飞服务试连返回的数据格式异常。',502));}});
+      remote.addEventListener('close',()=>{if(!done)finish(new XfError('讯飞在业务试连期间关闭连接，请检查超拟人交互授权和额度。',502));});
+      remote.addEventListener('error',()=>finish(new XfError('讯飞服务试连失败，请检查网络和服务授权。',502)));
+      try{remote.accept();send();if(!done){interval=liveTimers.setInterval(send,20);settle=liveTimers.setTimeout(()=>finish(ack?null:new XfError('讯飞没有确认业务请求，请稍后重新验证。',502)),3000);}}catch{finish(new XfError('无法完成讯飞服务试连。',502));}
+    });
   }
   function connectXf(request){
     if(request.headers.get('Upgrade')?.toLowerCase()!=='websocket')return json({error:'需要 WebSocket 连接。'},426);
     const [client,server]=Object.values(pairFactory());server.accept();server.binaryType='arraybuffer';
-    let remote=null,state='waiting',credentials,options,first=true;
+    let remote=null,state='waiting',credentials,options,first=true,openedAt=0;
     const send=value=>{try{if(server.readyState===1)server.send(typeof value==='string'||value instanceof ArrayBuffer?value:JSON.stringify(value));}catch{}};
     const finish=(message='',code=1000)=>{
       if(state==='closed')return;const wasReady=state==='ready';state='closed';clearTimeout(timer);if(message)send({type:'local.error',message});
@@ -173,15 +193,14 @@ export function createCloudApp({fetchImpl=fetch,assets={},siteOrigin,pairFactory
           remote.addEventListener('message',incoming=>{
             if(state==='closed')return;
             try{
-              if(typeof incoming.data!=='string')return;
               const {event:value,audio}=xfParse(incoming.data);
               if(value.code!==0)return finish(xfErrorMessage(value.code,value.message),1011);
               send(value);if(audio?.byteLength)send(audio.buffer.slice(audio.byteOffset,audio.byteOffset+audio.byteLength));
             }catch{finish('讯飞实时语音协议处理失败，请重新开始。',1011);}
           });
-          remote.addEventListener('close',()=>finish(state==='ready'?'讯飞实时连接已结束（单次连接最长 30 分钟）。':''));
+          remote.addEventListener('close',event=>finish(state==='ready'?`讯飞在连接 ${Math.max(0,Math.round((Date.now()-openedAt)/1000))} 秒后关闭（代码 ${event.code||'未提供'}）。请检查超拟人交互的授权和额度；录音、字幕已保留。`:''));
           remote.addEventListener('error',()=>finish('讯飞实时连接出现错误，请重试。',1011));
-          remote.accept();state='ready';clearTimeout(timer);send({type:'xf.ready'});
+          remote.accept();state='ready';openedAt=Date.now();clearTimeout(timer);send({type:'xf.ready'});
           return;
         }
         if(state!=='ready'||remote?.readyState!==1)throw new XfError('会话尚未就绪。');
@@ -205,13 +224,13 @@ export function createCloudApp({fetchImpl=fetch,assets={},siteOrigin,pairFactory
       if(path==='/connect')return request.method==='GET'?connect(request):json({error:'方法不支持。'},405);
       if(path==='/connect-xf')return request.method==='GET'?connectXf(request):json({error:'方法不支持。'},405);
       if(path==='/api/xf/verify'&&request.method==='POST'){
-        try{const remote=await xfOpen(xfCredentials(await readBody(request,8192,XfError)));try{remote.accept();remote.close(1000,'验证完成');}catch{}return json({ok:true});}
+        try{return json(await xfVerifyService(xfCredentials(await readBody(request,8192,XfError))));}
         catch(error){return json({error:error instanceof XfError?error.message:'验证未能完成，请稍后重试。'},error.status||502);}
       }
       if(request.method!=='POST')return json({error:'请通过页面操作。'},405);
-      if(path==='/api/moss/transcribe'||path==='/api/moss/task'||path==='/api/moss/summary'||path==='/api/moss/ask'){
+      if(['/api/moss/transcribe','/api/moss/task','/api/moss/summary','/api/moss/ask','/api/moss/voices','/api/moss/speech'].includes(path)){
         let key='';try{key=credential(request.headers.get('Authorization')?.match(/^Bearer (.+)$/i)?.[1]);}catch{}
-        return recapRoute(path,{key,fetchImpl,signal:request.signal,contentType:request.headers.get('Content-Type'),keyterms:request.headers.get('X-Keyterms'),readBytes:limit=>readBytes(request,limit,RecapError),readJson:limit=>readBody(request,limit,RecapError)});
+        return recapRoute(path,{key,fetchImpl,signal:request.signal,contentType:request.headers.get('Content-Type'),transcribeModel:request.headers.get('X-Transcribe-Model'),keyterms:request.headers.get('X-Keyterms'),readBytes:limit=>readBytes(request,limit,RecapError),readJson:limit=>readBody(request,limit,RecapError)});
       }
       try{
         const data=await readBody(request);
@@ -238,7 +257,7 @@ export function createCloudApp({fetchImpl=fetch,assets={},siteOrigin,pairFactory
     const name=path==='/'||path==='/index.html'?'/index.html':path==='/vexa'?'/vexa.html':path==='/demo'||path==='/demo/'?'/demo/index.html':path;
     const asset=assets[name];if(!asset)return json({error:'页面不存在。'},404);
     const socketOrigins=[url.origin,siteOrigin].filter(Boolean).map(value=>value.replace(/^http/,'ws')).join(' ');
-    return new Response(request.method==='HEAD'?null:asset.text,{headers:{'Content-Type':asset.type,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':`default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' ${socketOrigins}; worker-src 'self'; frame-ancestors 'none'; base-uri 'none'`,'Permissions-Policy':'microphone=(self), camera=()'}});
+    return new Response(request.method==='HEAD'?null:asset.text,{headers:{'Content-Type':asset.type,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':`default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' ${socketOrigins}; media-src 'self' blob:; worker-src 'self'; frame-ancestors 'none'; base-uri 'none'`,'Permissions-Policy':'microphone=(self), camera=()'}});
   }};
 }
 export default createCloudApp({assets:typeof WORKER_ASSETS==='undefined'?{}:WORKER_ASSETS,siteOrigin:typeof SITE_ORIGIN==='undefined'?undefined:SITE_ORIGIN});

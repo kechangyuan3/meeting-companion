@@ -46,5 +46,5 @@ export function createNexAssistant({request, configured, conversation, $}) {
     const text = '# Nex N2.6 · 会议问答\n\n' + entries.map(item => `## 问：${item.question}\n\n${item.answer}`).join('\n\n');
     const url = URL.createObjectURL(new Blob([text], {type: 'text/markdown;charset=utf-8'})), link = document.createElement('a');link.href = url;link.download = 'Nex-N2.6-会议问答.md';link.click();setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
-  refresh();return {refresh, cancel: () => running?.abort(), ask};
+  refresh();return {refresh, cancel: () => running?.abort(), ask, lastAnswer: () => entries.at(-1)?.answer || ''};
 }

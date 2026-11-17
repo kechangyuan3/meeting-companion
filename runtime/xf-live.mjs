@@ -68,6 +68,7 @@ export function xfFrame(credentials, options, {status, audio = new Uint8Array(0)
 
 // 讯飞回复 → 给页面的事件（字幕、对话状态）+ 可选的 PCM 音频。
 export function xfParse(text) {
+  if (text instanceof ArrayBuffer || ArrayBuffer.isView(text)) text = new TextDecoder().decode(text);
   if (typeof text !== 'string' || text.length > 8 * 1024 * 1024) throw new XfError('讯飞返回的数据格式异常。', 502);
   const raw = JSON.parse(text); const header = raw.header || {}, payload = raw.payload || {};
   const event = {type: 'xf', code: Number(header.code) || 0, message: String(header.message || '').slice(0, 300), status: Number(header.status) || 0};
@@ -84,6 +85,7 @@ export function xfParse(text) {
 }
 
 export function xfErrorMessage(code, message = '') {
+  if (code === 11200) return '讯飞服务授权/额度未通过（11200）：当前 APPID 没有“超拟人交互”授权，或授权包/额度已失效。请检查该服务的授权包和有效期；OCR 额度不能用于实时语音。';
   if (code === 10110 || /licen[cs]e/i.test(message)) return '讯飞授权未通过：请确认这个 APPID 已在讯飞控制台领取或购买“超拟人交互”服务包。';
   if (code === 10313 || /app_?id/i.test(message)) return '讯飞 APPID 与 APIKey 不匹配，请从同一个应用复制。';
   if (/time|超时|expire/i.test(message)) return `讯飞会话超时（${code}），请重新开始。`;

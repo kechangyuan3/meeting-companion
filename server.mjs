@@ -30,7 +30,7 @@ async function sendResponse(res, response) {
   catch {res.destroy(); return;}
   res.end();
 }
-const recapPaths = new Set(['/api/moss/transcribe', '/api/moss/task', '/api/moss/summary', '/api/moss/ask']);
+const recapPaths = new Set(['/api/moss/transcribe', '/api/moss/task', '/api/moss/summary', '/api/moss/ask', '/api/moss/voices', '/api/moss/speech']);
 
 export async function startMeeting({port = 17860, apiKey = process.env.MOSS_API_KEY || '', codexPath, proxyUrl, run: suppliedRun,
   upstreamUrl = 'wss://api.mosi.cn/v1/realtime?model=moss-live-1.0', verifyKey, vexaBaseUrl, vexaFetch, mossFetch = fetch} = {}) {
@@ -49,7 +49,7 @@ export async function startMeeting({port = 17860, apiKey = process.env.MOSS_API_
       if (req.method !== 'GET' && req.headers.origin !== `http://${authority}`) return json(res, 403, {error: '请求来源不正确。'});
       try {
         if (recapPaths.has(path) && req.method === 'POST') return await sendResponse(res, await recapRoute(path, {
-          key: apiKey, fetchImpl: mossFetch, contentType: req.headers['content-type'], keyterms: req.headers['x-keyterms'],
+          key: apiKey, fetchImpl: mossFetch, contentType: req.headers['content-type'], transcribeModel: req.headers['x-transcribe-model'], keyterms: req.headers['x-keyterms'],
           readBytes: limit => rawBody(req, limit),
           readJson: async limit => {try {return JSON.parse(Buffer.from(await rawBody(req, limit)).toString('utf8') || '{}');} catch (error) {throw error instanceof RecapError ? error : new RecapError('请求格式不正确。');}},
         }));

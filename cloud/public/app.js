@@ -1,4 +1,4 @@
-import {mossApi,authenticateMoss,mossRequest,xfConfigure,xfConfigured,xfForget,mossConfigured,authenticateXf,currentXfCredentials} from './cloud-api.js';
+import {mossApi,authenticateMoss,mossRequest,xfConfigure,xfConfigured,xfForget,xfMarkUnverified,mossConfigured,authenticateXf,currentXfCredentials} from './cloud-api.js';
 import {createCredentialVault} from './credential-vault.js';
 import {XfLink} from './xf-link.js';
 import {Microphone} from './media/mic.js';
@@ -7,6 +7,7 @@ import {PublicSession} from './media/public-session.js';
 import {MeetingRecorder} from './media/recorder.js';
 import {createRecap} from './recap.js';
 import {createNexAssistant} from './nex-assistant.js';
+import {createMeetingSpeech} from './meeting-speech.js';
 
 const $ = id => document.getElementById(id);
 let configured = false, socket, microphone, session, audio, ticker, elapsedTimer, startedAt, epoch = 0, muted = false;
@@ -66,12 +67,21 @@ async function restoreXfHere() {
     if (current !== xfStorageEpoch || !saved || Object.values(xfForm()).some(value => value.trim())) return;
     $('xf-appid').value = saved.appId; $('xf-apikey').value = saved.apiKey; $('xf-apisecret').value = saved.apiSecret;
     $('xf-remember').checked = true; $('engine').value = 'xf'; showEngine();
-    feedback('xf-storage-message', '已从此浏览器恢复凭据，点击“验证讯飞密钥”即可使用。', 'ok');
+    feedback('xf-storage-message', '已从此浏览器恢复凭据，点击“验证讯飞服务”检查授权和额度。', 'ok');
   } catch (error) {feedback('xf-storage-message', error.message, 'error');}
 }
 // 会后整理（MOSS-Transcribe-Diarize-Pro 分人转写 + Nex N2.6 纪要），请求附上当前页面的 Key。
 const recap = createRecap({request: mossRequest, $});
-const nexAssistant = createNexAssistant({request: mossRequest, configured: mossConfigured, conversation: () => conversationOf(meetingEpoch), $});
+const nexAssistant = createNexAssistant({request: mossRequest, configured: mossConfigured, conversation: () => recap.context().length ? recap.context() : conversationOf(meetingEpoch), $});
+const meetingSpeech = createMeetingSpeech({request: mossRequest, configured: mossConfigured, answer: nexAssistant.lastAnswer, summary: recap.summary, $});
+$('audio-import').onclick = () => {
+  try {
+    if (socket || xfLink) throw Error('请先结束当前会议，再载入其他录音。');
+    const file = $('audio-file').files?.[0]; if (!file) throw Error('请先选择一份录音。');
+    recap.importAudio(file);feedback('audio-import-message', '已在本页载入，尚未上传。请在下方点击“生成转写和纪要”。', 'ok');
+    $('recap').scrollIntoView({behavior: 'smooth', block: 'start'});
+  } catch (error) {feedback('audio-import-message', error.message, 'error');}
+};
 function feedback(id, text, type = '') {$(id).textContent = text; $(id).className = `feedback ${type}`;}
 function notice(text) {$('notice').textContent = text; $('notice').hidden = !text;}
 function status(kind, title, subtitle) {
@@ -94,7 +104,7 @@ async function refreshStatus() {
 }
 function showEngine() {
   const xf = engine() === 'xf'; $('xf-box').hidden = !xf;
-  $('moss-label').textContent = xf ? 'MOSS API Key（Nex 问答、分人转写和纪要用）' : 'MOSS API Key';
+  $('moss-label').textContent = xf ? 'MOSS API Key（Nex 问答、转写、纪要和朗读）' : 'MOSS API Key';
   $('live-model-name').textContent = xf ? '讯飞星火 · 超拟人交互（服务内置模型）' : 'MOSS-Live 1.0';
   updateStart();
 }
@@ -102,14 +112,14 @@ $('engine').onchange = showEngine;
 $('xf-save').onclick = async () => {
   $('xf-save').disabled = true; feedback('xf-message', '正在连接讯飞验证密钥…');
   try {
-    await xfConfigure({appId: $('xf-appid').value, apiKey: $('xf-apikey').value, apiSecret: $('xf-apisecret').value});
+    await xfConfigure(xfForSaving());
     if ($('xf-remember').checked) {
       try {await saveXfHere(currentXfCredentials());} catch (error) {feedback('xf-storage-message', `验证成功，但未能记住凭据：${error.message}`, 'error');}
     }
     $('xf-apikey').value = ''; $('xf-apisecret').value = ''; $('xf-apikey').placeholder = $('xf-apisecret').placeholder = '已验证，替换时重新粘贴';
-    $('xf-badge').textContent = '已验证'; $('xf-badge').className = 'badge ready';
-    feedback('xf-message', mossConfigured() ? '讯飞密钥已验证，可以开始会议。' : '讯飞密钥已验证，可以开始会议。会后想生成分人转写和纪要，再填一下 MOSS Key。', 'ok'); updateStart();
-  } catch (error) {feedback('xf-message', error.message, 'error');}
+    $('xf-badge').textContent = '服务试连通过'; $('xf-badge').className = 'badge ready';
+    feedback('xf-message', mossConfigured() ? '讯飞业务试连通过，可以开始会议。' : '讯飞业务试连通过，可以开始会议。Nex 问答、转写、纪要和朗读还需要 MOSS Key。', 'ok'); updateStart();
+  } catch (error) {$('xf-badge').textContent='服务未通过';$('xf-badge').className='badge';feedback('xf-message', error.message, 'error');updateStart();}
   finally {$('xf-save').disabled = false;}
 };
 $('save-key').onclick = async () => {
@@ -179,7 +189,7 @@ async function stop({keepError = false, recap: recapMode = keepError ? 'manual' 
   if (activeRecorder && recapMode !== 'none') {
     const nickname = $('nickname').value.trim() || '小莫';
     recap.ready(recorded, {startedAt: meetingStartedAt, nickname, engine: engine() === 'xf' ? '讯飞星火超拟人交互' : 'MOSS-Live', keyterms: [...new Set([nickname, '小莫', 'MOSS'])], conversation: conversationOf(meetingEpoch)}, {auto: recapMode === 'auto' && mossConfigured()});
-    if (recorded.length && !mossConfigured()) feedback('recap-note', '录音已保存在本页，可以点“下载录音”。想生成分人转写和纪要，先在左侧填写并验证 MOSS Key，再点“生成分人转写和纪要”。');
+    if (recorded.length && !mossConfigured()) feedback('recap-note', '录音已保存在本页，可以点“下载录音”。想生成转写和纪要，先在左侧填写并验证 MOSS Key，再点“生成转写和纪要”。');
   }
 }
 function fail(text) {preservedError = true; notice(text); status('error', '连接需要检查', '修复后可以重新开始，现有字幕仍保留在页面中。'); void stop({keepError: true});}
@@ -295,7 +305,7 @@ function startXf(current) {
       user: (n, text, done) => {if (current === epoch) addMessage(`user:${current}:x${n}`, 'user', text, done);},
       ai: (n, text, done) => {if (current === epoch) addMessage(`ai:${current}:x${n}`, 'ai', text, done);},
       speaking: on => {if (current === epoch && recorder) status(on ? 'speaking' : 'listening', on ? `${nickname}正在回应` : `${nickname}在听`, on ? '你可以随时开口补充或打断。' : `讨论可以继续，需要帮忙时叫“${nickname}”。`);},
-      error: message => {if (current === epoch && !preservedError) fail(message);},
+      error: message => {if (current === epoch && !preservedError) {xfMarkUnverified();$('xf-badge').textContent='需要检查服务';$('xf-badge').className='badge';fail(message);}},
     }});
   xfLink.start();
 }
@@ -309,14 +319,14 @@ $('export').onclick = () => {
 };
 $('shutdown').onclick = async () => {
   nexAssistant.cancel();
-  await stop({recap: 'none'}); await api('/api/shutdown', {}); xfForget();
+  await stop({recap: 'none'}); await api('/api/shutdown', {}); xfForget(); meetingSpeech.clear();
   nexAssistant.refresh();
   try {await clearSavedXf();} catch (error) {notice(error.message);}
   for (const id of ['xf-appid', 'xf-apikey', 'xf-apisecret', 'api-key']) $(id).value = '';
   $('xf-badge').textContent = '待填写'; $('xf-badge').className = 'badge';
   $('meeting-title').textContent = '连接已清除'; $('meeting-subtitle').textContent = '重新填写并验证所选服务的凭据，即可再次开始。'; $('start').disabled = true;
 };
-window.addEventListener('pagehide', () => {microphone?.close(); session?.close(); socket?.close();});
+window.addEventListener('pagehide', () => {microphone?.close(); session?.close(); socket?.close(); meetingSpeech.clear();});
 showEngine(); refreshStatus().catch(error => notice(error.message)); devices().catch(() => {});
 void restoreXfHere();
 setInterval(() => {if (!document.hidden && !socket && !xfLink) refreshStatus().catch(() => {});}, 3000);

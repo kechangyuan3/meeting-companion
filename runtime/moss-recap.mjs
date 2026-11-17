@@ -2,11 +2,13 @@
 // 本文件不依赖 Node 专属 API，本机服务和在线 Worker 共用（在线构建时会去掉 export 内联）。
 
 export const RECAP_TRANSCRIBE_MODEL = 'moss-transcribe-diarize-pro';
+export const RECAP_TRANSCRIBE_MODELS = ['moss-transcribe-diarize-pro', 'moss-transcribe-1.0'];
+export const MEETING_SPEECH_MODELS = ['moss-tts-1.5-flash', 'moss-tts-1.0-pro'];
 export const RECAP_SUMMARY_MODEL = 'nex-n2.6';
 export const NEX_MEETING_CONTEXT_LIMIT = 60000;
 export const RECAP_MAX_AUDIO_BYTES = 40 * 1024 * 1024;
 export const RECAP_MAX_SUMMARY_BODY = 2 * 1024 * 1024;
-export const RECAP_AUDIO_TYPES = {'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/mp4': 'm4a', 'audio/wav': 'wav'};
+export const RECAP_AUDIO_TYPES = {'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/mp4': 'm4a', 'audio/wav': 'wav', 'audio/mpeg': 'mp3', 'audio/flac': 'flac', 'audio/aac': 'aac'};
 const RECAP_INPUT_LIMIT = 100000;
 
 export class RecapError extends Error {
@@ -15,7 +17,7 @@ export class RecapError extends Error {
 
 export function recapAudioType(value) {
   const type = String(value || '').split(';')[0].trim().toLowerCase();
-  if (!Object.hasOwn(RECAP_AUDIO_TYPES, type)) throw new RecapError('录音格式不受支持，请使用 Chrome、Edge 或 Safari 重新开会。', 415);
+  if (!Object.hasOwn(RECAP_AUDIO_TYPES, type)) throw new RecapError('录音格式不受支持，请使用 WebM、OGG、M4A、WAV、MP3、FLAC 或 AAC。', 415);
   return type;
 }
 
@@ -31,15 +33,26 @@ export function recapKeyterms(value) {
 }
 
 // 异步转写：返回任务编号，再用 /v1/audio/tasks/{id} 查询结果。
-export function recapTranscribeForm(bytes, type, keyterms = []) {
+export function recapTranscribeForm(bytes, type, keyterms = [], model = RECAP_TRANSCRIBE_MODEL) {
+  if (!RECAP_TRANSCRIBE_MODELS.includes(model)) throw new RecapError('请选择普通转写或多人分人转写模型。');
   const form = new FormData();
-  form.append('model', RECAP_TRANSCRIBE_MODEL);
-  form.append('diarize', 'true');
+  form.append('model', model);
+  if (model === RECAP_TRANSCRIBE_MODEL) form.append('diarize', 'true');
   form.append('async', 'true');
   const terms = recapKeyterms(keyterms);
-  if (terms.length) form.append('keyterms', JSON.stringify(terms));
+  if (terms.length && model === RECAP_TRANSCRIBE_MODEL) form.append('keyterms', JSON.stringify(terms));
   form.append('file', new Blob([bytes], {type}), `meeting.${RECAP_AUDIO_TYPES[type]}`);
   return form;
+}
+
+export function meetingSpeechRequest(data) {
+  const model = data?.model || MEETING_SPEECH_MODELS[0];
+  const text = typeof data?.text === 'string' ? data.text.trim() : '';
+  const voice = typeof data?.voiceId === 'string' ? data.voiceId.trim() : '';
+  if (!MEETING_SPEECH_MODELS.includes(model)) throw new RecapError('请选择 MOSS TTS Flash 或 Pro。');
+  if (!text || text.length > 5000) throw new RecapError('请填写 1–5000 字符的朗读内容。');
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(voice)) throw new RecapError('请选择可用音色，或填入 MOSS 音色库的音色 ID。');
+  return {model, input: text, voice_id: voice, stream: false, response_format: 'mp3', delivery_method: 'audio'};
 }
 
 export function recapTaskCreated(value) {
@@ -95,8 +108,8 @@ export function recapSummaryRequest(data) {
     '## 会议概要（2–3 句）\n## 决定\n## 待办（每条写：事项｜负责人｜截止时间；转写里没有就写“待确认”）\n## 分歧与未决问题\n## 需要会后确认的信息',
   ].join('\n');
   const parts = [];
-  if (transcript) parts.push(`# 会议分人转写（MOSS-Transcribe-Diarize-Pro）\n${transcript}`);
-  if (dialogue) parts.push(`# 会中与 ${name} 的实时对话字幕（MOSS-Live，仅作参考）\n${dialogue}`);
+  if (transcript) parts.push(`# 会议音频转写（说话人标签不代表已验证身份）\n${transcript}`);
+  if (dialogue) parts.push(`# 会中与 ${name} 的实时对话字幕（仅作参考）\n${dialogue}`);
   if (truncated) parts.push('（注意：会议内容过长，以上已截断，请在概要中说明纪要只覆盖前半部分。）');
   return {
     model: RECAP_SUMMARY_MODEL, stream: true, max_tokens: 16384,
@@ -188,13 +201,25 @@ export async function recapRoute(path, io) {
       const bytes = await io.readBytes(RECAP_MAX_AUDIO_BYTES);
       if (!bytes?.byteLength) throw new RecapError('录音为空，无法转写。');
       const keyterms = (() => { try { return JSON.parse(decodeURIComponent(io.keyterms || '[]')); } catch { return []; } })();
-      const response = await call('/v1/audio/transcriptions', {method: 'POST', body: recapTranscribeForm(bytes, type, keyterms)}, 120000);
+      const response = await call('/v1/audio/transcriptions', {method: 'POST', body: recapTranscribeForm(bytes, type, keyterms, io.transcribeModel || RECAP_TRANSCRIBE_MODEL)}, 120000);
       return recapJson(recapTaskCreated(await parse(response)));
     }
     if (path === '/api/moss/task') {
       const data = await io.readJson(4096);
       const response = await call(`/v1/audio/tasks/${encodeURIComponent(recapTaskId(data?.taskId))}`, {method: 'GET'}, 25000);
       return recapJson(recapTask(await parse(response)));
+    }
+    if (path === '/api/moss/voices') {
+      const response = await call('/v1/audio/voices?limit=100', {method: 'GET'}, 25000);
+      const data = await parse(response);
+      const voices = (Array.isArray(data?.data) ? data.data : []).filter(item => /^[A-Za-z0-9_-]{1,128}$/.test(item?.id || '')).slice(0, 100).map(item => ({id: item.id, name: typeof item.name === 'string' ? item.name.slice(0, 80) : ''}));
+      return recapJson({voices, hasMore: data?.has_more === true});
+    }
+    if (path === '/api/moss/speech') {
+      const request = meetingSpeechRequest(await io.readJson(40000));
+      const response = await call('/v1/audio/speech', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(request)}, 180000);
+      if (!response.body || !response.headers.get('Content-Type')?.toLowerCase().startsWith('audio/')) throw new RecapError('MOSS 没有返回可播放音频，请检查音色是否可用。', 502);
+      return new Response(response.body, {headers: {'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'X-Meeting-Model': request.model}});
     }
     if (path === '/api/moss/summary' || path === '/api/moss/ask') {
       const data = await io.readJson(RECAP_MAX_SUMMARY_BODY);
