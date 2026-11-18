@@ -16,7 +16,7 @@ export async function buildPages({out=join(root,'pages-dist'),backend='https://m
       let text=await readFile(source,'utf8');
       if(extname(entry.name)==='.html'&&!prefix.startsWith('demo/')){
         text=text.replaceAll('href="/style.css"','href="./style.css"').replaceAll('href="/vexa.css"','href="./vexa.css"').replaceAll('href="/demo/"','href="./demo/"').replaceAll('href="/vexa"','href="./vexa.html"').replaceAll('href="/"','href="./"').replaceAll('src="/app.js"','src="./app.js"').replaceAll('src="/vexa.js"','src="./vexa.js"');
-        text=text.replace('在线版 · 每人使用自己的 Key','GitHub Pages · 每人使用自己的 Key');
+        text=text.replace('在线版 · 每人使用自己的 Key','GitHub Pages · 每人使用自己的 Key').replace('公开在线版 ·','GitHub Pages ·');
         const policy=`default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' ${url.origin} ${url.origin.replace(/^http/,'ws')}; media-src 'self' blob:; worker-src 'self'; base-uri 'none'; form-action 'none'`;
         text=text.replace('</head>',`<meta http-equiv="Content-Security-Policy" content="${policy}"><meta name="referrer" content="no-referrer"></head>`);
       }

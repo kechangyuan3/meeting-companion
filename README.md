@@ -1,6 +1,10 @@
 # 会议搭子
 
-想发布成 `kechangyuan3.github.io/meeting-companion/`：请按 [GitHub Pages 逐步教程](docs/github-pages.md) 设置 Source 为 GitHub Actions，再运行 **Publish GitHub Pages**。网页由 GitHub 公开托管，真实语音 API 继续使用现有后台。Pages 入口需要首次发布后才可访问。
+**最新版：2026.11.18 · 公开在线版**
+
+**[立即打开最新版会议搭子](https://meeting-companion-kechangyuan3.happymorel8.chatgpt.site/)**
+
+直接把上面的网页地址发给朋友即可，无需先配置 GitHub Pages。页面可公开查看，真实 AI 功能由每位访客填写自己的服务密钥并使用各自额度。源码与现有在线版同步，更新内容见 [版本说明](docs/releases/2026-11-18.md)。
 
 把 MOSS-Live 实时交流、Vexa 线上会议转写和 Codex 后台任务放进同一个工作台。
 
@@ -14,9 +18,10 @@
 
 ## 功能
 
-| 服务 | 本地真实版本 |
+| 服务 | 功能 |
 | --- | --- |
 | MOSS-Live | 电脑麦克风实时对话、打断、字幕及任务委派 |
+| 讯飞星火超拟人交互（在线版） | 全双工语音、中文识别与回答，服务授权验证、浏览器可选加密记住凭据 |
 | MOSS-Transcribe-Diarize-Pro | 会后把会议录音转成分说话人的文字（S01、S02…），带时间点 |
 | Nex N2.6（MOSS 平台） | 会中依据字幕回答问题；会后依据转写生成概要、决定、待办、分歧 |
 | MOSS-Transcribe 1.0 | 普通音频转写，不区分说话人 |
@@ -25,6 +30,15 @@
 | Codex CLI（可选） | 接收 MOSS 委派的查询任务，或整理 Vexa 已确认的会议转写 |
 
 当前 MOSS 与 Vexa 使用各自入口；尚未把 MOSS 音频送入线上会议，也未把 Vexa 转写自动转发给 MOSS。Vexa v0.12 open-core 的 `/speak` 仍未接通，见[官方 API 说明](https://docs.vexa.ai/api/meetings)。
+
+## 源码入口
+
+- `cloud/public/`：当前完整在线界面，包含讯飞、Nex 会中问答、录音导入、转写、纪要和朗读。
+- `worker/index.js` 与 `runtime/`：在线 API / WebSocket 后台与共享协议。
+- `public/` 与 `server.mjs`：本机运行界面，含 Codex CLI 委派；不是在线页面的发布目录。
+- `demo/`：无需 Key 的预设交互演示，内容为示例。
+
+如还想另行使用 `kechangyuan3.github.io/meeting-companion/` 网址，可以按 [GitHub Pages 教程](docs/github-pages.md) 发布；现有在线网址已可直接分享。
 
 ## 会中对话可选讯飞星火（在线版）
 
