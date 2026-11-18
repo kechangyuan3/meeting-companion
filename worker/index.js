@@ -28,7 +28,8 @@ function nativeKey(data){
   return {platform,id,tail:`${platform}/${encodeURIComponent(id)}`};
 }
 
-export function createCloudApp({fetchImpl=fetch,assets={},siteOrigin,pairFactory=()=>new WebSocketPair(),upgradeResponse=client=>new Response(null,{status:101,webSocket:client}),liveTimers={setTimeout,clearTimeout,setInterval,clearInterval}}={}){
+export function createCloudApp({fetchImpl=fetch,assets={},siteOrigin,additionalOrigins=[],pairFactory=()=>new WebSocketPair(),upgradeResponse=client=>new Response(null,{status:101,webSocket:client}),liveTimers={setTimeout,clearTimeout,setInterval,clearInterval}}={}){
+  const originAllowed = request => [new URL(request.url).origin,siteOrigin,...additionalOrigins].filter(Boolean).includes(request.headers.get('Origin'));
   async function upstream(base,path,key,{method='GET',data}={}){
     let response;
     try{response=await fetchImpl(`${base}${path}`,{method,headers:{...(base===MOSS?{Authorization:`Bearer ${key}`}:{'X-API-Key':key}),...(data?{'Content-Type':'application/json'}:{})},...(data?{body:JSON.stringify(data)}:{}),signal:AbortSignal.timeout(25000),redirect:'manual'});}
@@ -216,11 +217,11 @@ export function createCloudApp({fetchImpl=fetch,assets={},siteOrigin,pairFactory
     server.addEventListener('close',()=>finish());server.addEventListener('error',()=>finish('',1011));
     return upgradeResponse(client);
   }
-  return {async fetch(request){
+  async function handle(request){
     const url=new URL(request.url),path=url.pathname;
     if(path.startsWith('/api/')||path==='/connect'||path==='/connect-xf'){
       const origin=request.headers.get('Origin');
-      if(!origin||![url.origin,siteOrigin].filter(Boolean).includes(origin))return json({error:'请求来源不正确。'},403);
+      if(!origin||!originAllowed(request))return json({error:'请求来源不正确。'},403);
       if(path==='/connect')return request.method==='GET'?connect(request):json({error:'方法不支持。'},405);
       if(path==='/connect-xf')return request.method==='GET'?connectXf(request):json({error:'方法不支持。'},405);
       if(path==='/api/xf/verify'&&request.method==='POST'){
@@ -258,8 +259,22 @@ export function createCloudApp({fetchImpl=fetch,assets={},siteOrigin,pairFactory
     const asset=assets[name];if(!asset)return json({error:'页面不存在。'},404);
     const socketOrigins=[url.origin,siteOrigin].filter(Boolean).map(value=>value.replace(/^http/,'ws')).join(' ');
     return new Response(request.method==='HEAD'?null:asset.text,{headers:{'Content-Type':asset.type,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':`default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' ${socketOrigins}; media-src 'self' blob:; worker-src 'self'; frame-ancestors 'none'; base-uri 'none'`,'Permissions-Policy':'microphone=(self), camera=()'}});
+  }
+  return {async fetch(request){
+    const origin=request.headers.get('Origin'),isApi=new URL(request.url).pathname.startsWith('/api/');
+    const cors=isApi&&originAllowed(request)?{'Access-Control-Allow-Origin':origin,'Vary':'Origin','Access-Control-Expose-Headers':'X-Meeting-Model'}:{};
+    if(isApi&&request.method==='OPTIONS'){
+      const method=request.headers.get('Access-Control-Request-Method');
+      const headers=(request.headers.get('Access-Control-Request-Headers')||'').toLowerCase().split(',').map(value=>value.trim()).filter(Boolean);
+      if(!originAllowed(request)||method!=='POST'||headers.some(name=>!['authorization','content-type','x-keyterms','x-transcribe-model'].includes(name)))return json({error:'请求来源或方法不正确。'},403);
+      return new Response(null,{status:204,headers:{...cors,'Access-Control-Allow-Methods':'POST','Access-Control-Allow-Headers':'Authorization, Content-Type, X-Keyterms, X-Transcribe-Model','Access-Control-Max-Age':'600'}});
+    }
+    const response=await handle(request);
+    if(!isApi||!originAllowed(request))return response;
+    const headers=new Headers(response.headers);for(const [name,value] of Object.entries(cors))headers.set(name,value);
+    return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
   }};
 }
-export default createCloudApp({assets:typeof WORKER_ASSETS==='undefined'?{}:WORKER_ASSETS,siteOrigin:typeof SITE_ORIGIN==='undefined'?undefined:SITE_ORIGIN});
+export default createCloudApp({assets:typeof WORKER_ASSETS==='undefined'?{}:WORKER_ASSETS,siteOrigin:typeof SITE_ORIGIN==='undefined'?undefined:SITE_ORIGIN,additionalOrigins:['https://kechangyuan3.github.io']});
 
 

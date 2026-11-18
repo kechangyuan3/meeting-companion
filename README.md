@@ -1,5 +1,7 @@
 # 会议搭子
 
+想发布成 `kechangyuan3.github.io/meeting-companion/`：请按 [GitHub Pages 逐步教程](docs/github-pages.md) 设置 Source 为 GitHub Actions，再运行 **Publish GitHub Pages**。网页由 GitHub 公开托管，真实语音 API 继续使用现有后台。Pages 入口需要首次发布后才可访问。
+
 把 MOSS-Live 实时交流、Vexa 线上会议转写和 Codex 后台任务放进同一个工作台。
 
 **[在线使用 MOSS](https://meeting-companion-kechangyuan3.happymorel8.chatgpt.site)** · **[在线使用 Vexa](https://meeting-companion-kechangyuan3.happymorel8.chatgpt.site/vexa)** · **[无需 Key 的流程演示](https://meeting-companion-kechangyuan3.happymorel8.chatgpt.site/demo/)**

@@ -9,6 +9,7 @@
     "test": "node --test test/*.test.mjs",
     "preview": "node scripts/preview.mjs",
     "build:cloud": "node scripts/build-cloud.mjs",
+    "build:pages": "node scripts/build-pages.mjs",
     "preview:cloud": "node scripts/cloud-preview.mjs"
   },
   "dependencies": {

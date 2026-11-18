@@ -8,6 +8,7 @@ import {MeetingRecorder} from './media/recorder.js';
 import {createRecap} from './recap.js';
 import {createNexAssistant} from './nex-assistant.js';
 import {createMeetingSpeech} from './meeting-speech.js';
+import {socketUrl} from './service-base.js';
 
 const $ = id => document.getElementById(id);
 let configured = false, socket, microphone, session, audio, ticker, elapsedTimer, startedAt, epoch = 0, muted = false;
@@ -212,7 +213,7 @@ async function start() {
     microphone = localMic; await devices();
     if (engine() === 'xf') return startXf(current);
     status('connecting', '正在连接 MOSS', '麦克风已准备好，等待实时会话。');
-    const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/connect`); socket = ws; ws.onopen = () => authenticateMoss(ws); ws.binaryType = 'arraybuffer';
+    const ws = new WebSocket(socketUrl('/connect')); socket = ws; ws.onopen = () => authenticateMoss(ws); ws.binaryType = 'arraybuffer';
     const send = message => {if (current === epoch && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));};
     const resetSession = () => {
       session?.close(); try {session?.speaker?.gainNode?.disconnect();} catch {}
@@ -291,7 +292,7 @@ function startXf(current) {
   status('connecting', '正在连接讯飞星火', '麦克风已准备好，等待实时会话。');
   const behaviour = $('mode').value === 'listen' ? '平时安静旁听，不主动插话；被叫到名字时再总结或回答。' : '参会者之间的讨论保持旁听；听到你的名字或明确向你提问时，简洁回应。';
   const prompt = `你叫${nickname}，是线下多人会议的 AI 参会者。用自然中文交流，语气亲切、简洁，每次回答尽量不超过三句话。${behaviour}区分对你的提问与参会者之间的对话，“嗯”“好的”等附和不需要回应。记住讨论的决定、分歧、待办和负责人；被要求整理结论时，分别说明决定和待办，不虚构负责人。你没有联网查询工具，需要实时信息时说明无法核实，不要编造。`;
-  xfLink = new XfLink({ctx: audio, url: `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/connect-xf`, authenticate: authenticateXf,
+  xfLink = new XfLink({ctx: audio, url: socketUrl('/connect-xf'), authenticate: authenticateXf,
     options: {voice: $('xf-voice').value, prompt, uid: `mc${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`},
     on: {
       ready: async () => {
